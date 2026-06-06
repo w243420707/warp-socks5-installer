@@ -31,6 +31,7 @@ else
 fi
 TARGET_COUNTRY="${TARGET_COUNTRY:-MX}"
 MAX_ATTEMPTS="${MAX_ATTEMPTS:-30}"
+SCAN_LIMIT="${SCAN_LIMIT:-100}"
 HARD_ROTATE_EVERY="${HARD_ROTATE_EVERY:-3}"
 KEEP_DAILY_TIMER="${KEEP_DAILY_TIMER:-0}"
 ENDPOINT_PORT="${ENDPOINT_PORT:-2408}"
@@ -41,6 +42,8 @@ TRY_DEFAULT_ENDPOINTS="${TRY_DEFAULT_ENDPOINTS:-1}"
 STATE_DIR="/var/lib/chooseip-warp-socks5"
 STATE_FILE="$STATE_DIR/state"
 ENDPOINT_CACHE_FILE="$STATE_DIR/endpoints"
+SCAN_RESULTS_FILE="$STATE_DIR/scan-results.csv"
+AVAILABLE_REGIONS_FILE="$STATE_DIR/available-regions"
 LOG_FILE="/var/log/chooseip-warp-socks5.log"
 SYSTEMD_SERVICE="/etc/systemd/system/chooseip-warp-socks5.service"
 SYSTEMD_TIMER="/etc/systemd/system/chooseip-warp-socks5.timer"
@@ -115,6 +118,16 @@ show_region_list() {
   done
 }
 
+region_name_for_code() {
+  WANT="$(normalize_country "$1")"
+  region_table | while read -r CODE NAME; do
+    if [ "$CODE" = "$WANT" ]; then
+      printf '%s\n' "$(printf '%s' "$NAME" | tr '_' ' ')"
+      exit 0
+    fi
+  done
+}
+
 country_from_menu_number() {
   WANT="$1"
   N=1
@@ -127,6 +140,27 @@ country_from_menu_number() {
   done
 }
 
+country_from_available_number() {
+  WANT="$1"
+  [ -r "$AVAILABLE_REGIONS_FILE" ] || return 1
+  sed -n "${WANT}p" "$AVAILABLE_REGIONS_FILE" | awk '{print $1}'
+}
+
+show_available_regions() {
+  if [ ! -s "$AVAILABLE_REGIONS_FILE" ]; then
+    printf 'No scanned regions yet. Run scan first.\n'
+    return 1
+  fi
+
+  N=1
+  while read -r CODE COUNT; do
+    NAME="$(region_name_for_code "$CODE" || true)"
+    [ -n "$NAME" ] || NAME="$CODE"
+    printf '%2s) %-2s %-22s endpoints=%s\n' "$N" "$CODE" "$NAME" "$COUNT"
+    N=$(( N + 1 ))
+  done <"$AVAILABLE_REGIONS_FILE"
+}
+
 select_target_country() {
   if [ "$TARGET_COUNTRY_WAS_SET" = "1" ]; then
     TARGET_COUNTRY="$(normalize_country "$TARGET_COUNTRY")"
@@ -134,9 +168,17 @@ select_target_country() {
   fi
 
   if [ -r /dev/tty ]; then
-    printf '\nAvailable target regions:\n'
-    show_region_list
-    printf '\nSelect a region number or type a two-letter country code [MX]: '
+    if [ -s "$AVAILABLE_REGIONS_FILE" ]; then
+      printf '\nScanned available regions:\n'
+      show_available_regions || true
+      printf '\nSelect a scanned region number or type a two-letter country code [MX]: '
+      MENU_SOURCE="available"
+    else
+      printf '\nBuilt-in target regions:\n'
+      show_region_list
+      printf '\nSelect a region number or type a two-letter country code [MX]: '
+      MENU_SOURCE="builtin"
+    fi
     read -r CHOICE </dev/tty || CHOICE=""
     CHOICE="${CHOICE:-MX}"
     case "$CHOICE" in
@@ -144,7 +186,11 @@ select_target_country() {
         TARGET_COUNTRY="$(normalize_country "$CHOICE")"
         ;;
       *)
-        SELECTED="$(country_from_menu_number "$CHOICE" || true)"
+        if [ "$MENU_SOURCE" = "available" ]; then
+          SELECTED="$(country_from_available_number "$CHOICE" || true)"
+        else
+          SELECTED="$(country_from_menu_number "$CHOICE" || true)"
+        fi
         [ -n "$SELECTED" ] || die "Invalid region selection: $CHOICE"
         TARGET_COUNTRY="$SELECTED"
         ;;
@@ -515,6 +561,61 @@ try_endpoint_once() {
   return 1
 }
 
+refresh_available_regions() {
+  [ -r "$SCAN_RESULTS_FILE" ] || return 1
+  awk -F, 'NR > 1 && $3 ~ /^[A-Z][A-Z]$/ {count[$3]++} END {for (c in count) print c, count[c]}' "$SCAN_RESULTS_FILE" \
+    | sort >"$AVAILABLE_REGIONS_FILE"
+  [ -s "$AVAILABLE_REGIONS_FILE" ]
+}
+
+scan_endpoint_once() {
+  ENDPOINT="$1"
+  set_custom_endpoint "$ENDPOINT" || return $?
+  restart_proxy_after_endpoint_change
+
+  OK=0
+  IP="unknown"
+  COUNTRY="UNKNOWN"
+  if wait_for_warp_health 60; then
+    RESULT="$(test_current_exit)"
+    IP="$(printf '%s\n' "$RESULT" | awk '{print $1}')"
+    COUNTRY="$(printf '%s\n' "$RESULT" | awk '{print $2}')"
+    [ "$COUNTRY" != "UNKNOWN" ] && OK=1
+  fi
+
+  printf '%s,%s,%s,%s,%s\n' "$ENDPOINT" "$IP" "$COUNTRY" "$OK" "$(date '+%F %T')" >>"$SCAN_RESULTS_FILE"
+  say "Scan result: endpoint=$ENDPOINT ip=$IP country=$COUNTRY ok=$OK"
+  return 0
+}
+
+scan_regions() {
+  prepare_socks5
+  build_endpoint_list || die "No endpoint candidates were available."
+
+  install -d -m 0755 "$STATE_DIR"
+  printf 'endpoint,exit_ip,country,ok,checked_at\n' >"$SCAN_RESULTS_FILE"
+
+  say "Starting endpoint scan. Limit: $SCAN_LIMIT. Results: $SCAN_RESULTS_FILE"
+  COUNT=0
+  while IFS= read -r ENDPOINT; do
+    [ -n "$ENDPOINT" ] || continue
+    COUNT=$(( COUNT + 1 ))
+    [ "$COUNT" -le "$SCAN_LIMIT" ] || break
+    say "Scan $COUNT/$SCAN_LIMIT"
+    if ! scan_endpoint_once "$ENDPOINT"; then
+      say "Custom endpoint mode is unavailable. Scan stopped."
+      break
+    fi
+  done <"$ENDPOINT_CACHE_FILE"
+
+  if refresh_available_regions; then
+    say "Available regions from this scan:"
+    show_available_regions
+  else
+    say "No usable regions were discovered in this scan."
+  fi
+}
+
 finalize_success() {
   if [ "$KEEP_DAILY_TIMER" = "1" ]; then
     install_timer
@@ -687,18 +788,73 @@ show_status() {
   [ -r "$STATE_FILE" ] && printf 'State file: %s\n' "$STATE_FILE"
 }
 
+read_tty() {
+  PROMPT="$1"
+  DEFAULT="${2:-}"
+  printf '%s' "$PROMPT" >/dev/tty
+  read -r ANSWER </dev/tty || ANSWER=""
+  printf '%s\n' "${ANSWER:-$DEFAULT}"
+}
+
+interactive_menu() {
+  while :; do
+    printf '\nchooseIP WARP SOCKS5\n' >/dev/tty
+    printf '1) Scan endpoints and build available region list\n' >/dev/tty
+    printf '2) Show scanned available regions\n' >/dev/tty
+    printf '3) Choose region and fix WARP SOCKS5\n' >/dev/tty
+    printf '4) Show current status\n' >/dev/tty
+    printf '5) Show built-in region list\n' >/dev/tty
+    printf '6) Remove daily timer\n' >/dev/tty
+    printf '0) Exit\n\n' >/dev/tty
+
+    CHOICE="$(read_tty 'Select: ' '')"
+    case "$CHOICE" in
+      1)
+        LIMIT="$(read_tty "Scan how many endpoints? [$SCAN_LIMIT]: " "$SCAN_LIMIT")"
+        SCAN_LIMIT="$LIMIT"
+        scan_regions
+        ;;
+      2)
+        show_available_regions || true
+        ;;
+      3)
+        TARGET_COUNTRY_WAS_SET=0
+        choose_country
+        ;;
+      4)
+        show_status
+        ;;
+      5)
+        show_region_list
+        ;;
+      6)
+        remove_timer
+        ;;
+      0)
+        exit 0
+        ;;
+      *)
+        printf 'Invalid selection.\n' >/dev/tty
+        ;;
+    esac
+  done
+}
+
 main() {
-  ACTION="${1:-choose}"
+  ACTION="${1:-menu}"
 
   case "$ACTION" in
     list) show_region_list; exit 0 ;;
+    list-available) show_available_regions; exit $? ;;
     help|-h|--help) usage ;;
   esac
 
   need_root "$@"
 
   case "$ACTION" in
+    menu|interactive) interactive_menu ;;
     choose|install) choose_country ;;
+    scan) scan_regions ;;
     status) show_status ;;
     uninstall-timer) remove_timer ;;
     *) usage ;;
@@ -708,11 +864,12 @@ main() {
 usage() {
   cat <<EOF
 Usage:
-  sh $0 [choose|install|list|status|uninstall-timer]
+  sh $0 [menu|choose|install|scan|list|list-available|status|uninstall-timer]
 
 Environment:
   TARGET_COUNTRY       Two-letter target country code. Default: MX
   MAX_ATTEMPTS         Max country-selection attempts. Default: 30
+  SCAN_LIMIT           Max endpoints to scan. Default: 100
   HARD_ROTATE_EVERY    Re-register every N attempts. Default: 3
   KEEP_DAILY_TIMER     Set to 1 to keep daily country checks. Default: 0
   SOCKS_PORT           Local SOCKS5 port. Default: 40000

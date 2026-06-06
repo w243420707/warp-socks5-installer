@@ -18,11 +18,13 @@ curl -fsSL https://raw.githubusercontent.com/w243420707/warp-socks5-installer/ma
 
 Cloudflare WARP does not officially support selecting an exit country. This script shows a region list, lets you choose a target, tries WARP endpoint candidates first, and stops when the detected exit IP country matches the target. After a successful match, it keeps that endpoint fixed and does not rotate daily by default.
 
-Interactive region menu:
+Interactive menu:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/w243420707/warp-socks5-installer/main/chooseIP-warp-socks5.sh | sudo env MAX_ATTEMPTS=50 sh
+curl -fsSL https://raw.githubusercontent.com/w243420707/warp-socks5-installer/main/chooseIP-warp-socks5.sh | sudo env MAX_ATTEMPTS=50 SCAN_LIMIT=100 sh
 ```
+
+Menu options include scanning endpoints, showing scanned regions, choosing a region to fix, status, and timer removal.
 
 Directly choose Mexico:
 
@@ -53,6 +55,8 @@ sudo sh install-warp-socks5.sh uninstall-timer
 For the country chooser:
 
 ```sh
+sudo sh chooseIP-warp-socks5.sh scan
+sudo sh chooseIP-warp-socks5.sh list-available
 sudo sh chooseIP-warp-socks5.sh list
 sudo env TARGET_COUNTRY=MX sh chooseIP-warp-socks5.sh status
 sudo env TARGET_COUNTRY=MX MAX_ATTEMPTS=30 sh chooseIP-warp-socks5.sh choose
