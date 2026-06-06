@@ -35,7 +35,7 @@ say() {
 }
 
 die() {
-  say "ERROR: $*"
+  say "错误: $*"
   exit 1
 }
 
@@ -44,7 +44,7 @@ need_root() {
     if command -v sudo >/dev/null 2>&1; then
       exec sudo sh "$0" "$@"
     fi
-    die "Please run as root, or install sudo first."
+    die "请使用 root 运行，或先安装 sudo。"
   fi
 }
 
@@ -53,7 +53,7 @@ cmd_exists() {
 }
 
 detect_os() {
-  [ -r /etc/os-release ] || die "Cannot detect Linux distribution: /etc/os-release is missing."
+  [ -r /etc/os-release ] || die "无法识别 Linux 发行版：缺少 /etc/os-release。"
   # shellcheck disable=SC1091
   . /etc/os-release
   OS_ID="${ID:-unknown}"
@@ -68,7 +68,7 @@ detect_os() {
     aarch64|arm64) ARCH_OK=1 ;;
     *) ARCH_OK=0 ;;
   esac
-  [ "$ARCH_OK" = 1 ] || die "CPU architecture $ARCH may not be supported by the official cloudflare-warp package."
+  [ "$ARCH_OK" = 1 ] || die "当前 CPU 架构 $ARCH 可能不受官方 cloudflare-warp 软件包支持。"
 }
 
 is_debian_like() {
@@ -100,15 +100,15 @@ apt_codename() {
   fi
 
   [ -n "$OS_CODENAME" ] && printf '%s\n' "$OS_CODENAME" && return
-  die "Cannot determine apt distribution codename. Set VERSION_CODENAME in /etc/os-release and retry."
+  die "无法识别 apt 发行版代号。请检查 /etc/os-release 中的 VERSION_CODENAME 后重试。"
 }
 
 install_cloudflare_warp_apt() {
   CODENAME="$(apt_codename)"
-  say "Detected Debian/Ubuntu family. Using Cloudflare apt repo: $CODENAME"
+  say "检测到 Debian/Ubuntu 系统，使用 Cloudflare apt 源：$CODENAME"
 
   export DEBIAN_FRONTEND=noninteractive
-  say "Installing apt prerequisites. Detailed apt output: $LOG_FILE"
+  say "正在安装 apt 前置依赖，详细日志：$LOG_FILE"
   apt-get update >>"$LOG_FILE" 2>&1
   apt-get install -y --no-install-recommends curl ca-certificates gnupg apt-transport-https >>"$LOG_FILE" 2>&1
 
@@ -120,22 +120,22 @@ install_cloudflare_warp_apt() {
   printf 'deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ %s main\n' "$CODENAME" \
     > /etc/apt/sources.list.d/cloudflare-client.list
 
-  say "Installing cloudflare-warp. Detailed apt output: $LOG_FILE"
+  say "正在安装 cloudflare-warp，详细日志：$LOG_FILE"
   apt-get update >>"$LOG_FILE" 2>&1
   apt-get install -y --no-install-recommends cloudflare-warp curl >>"$LOG_FILE" 2>&1
 }
 
 install_cloudflare_warp_rpm() {
-  say "Detected RPM family. Trying Cloudflare rpm repo."
+  say "检测到 RPM 系统，尝试使用 Cloudflare rpm 源。"
   if cmd_exists dnf; then
     PKG="dnf"
   elif cmd_exists yum; then
     PKG="yum"
   else
-    die "dnf/yum was not found."
+    die "未找到 dnf/yum。"
   fi
 
-  say "Installing rpm prerequisites. Detailed package output: $LOG_FILE"
+  say "正在安装 rpm 前置依赖，详细日志：$LOG_FILE"
   "$PKG" install -y curl ca-certificates >>"$LOG_FILE" 2>&1
   cat >/etc/yum.repos.d/cloudflare-warp.repo <<'EOF'
 [cloudflare-warp]
@@ -145,13 +145,13 @@ enabled=1
 gpgcheck=1
 gpgkey=https://pkg.cloudflareclient.com/pubkey.gpg
 EOF
-  say "Installing cloudflare-warp. Detailed package output: $LOG_FILE"
+  say "正在安装 cloudflare-warp，详细日志：$LOG_FILE"
   "$PKG" install -y cloudflare-warp >>"$LOG_FILE" 2>&1
 }
 
 install_cloudflare_warp() {
   if cmd_exists warp-cli; then
-    say "warp-cli found. Skipping cloudflare-warp package installation."
+    say "已检测到 warp-cli，跳过 cloudflare-warp 安装。"
     return
   fi
 
@@ -161,7 +161,7 @@ install_cloudflare_warp() {
   elif is_rpm_like; then
     install_cloudflare_warp_rpm
   else
-    die "Automatic installation is not supported for this Linux distribution: $OS_ID. Supported families: Debian/Ubuntu/RHEL/Fedora."
+    die "暂不支持自动安装此 Linux 发行版：$OS_ID。支持 Debian/Ubuntu/RHEL/Fedora 系。"
   fi
 }
 
@@ -184,12 +184,12 @@ systemd_available() {
 
 ensure_warp_service() {
   if ! systemd_available; then
-    die "systemd is not running, so the daily timer cannot be created."
+    die "当前系统未运行 systemd，无法创建每日自动任务。"
   fi
 
   systemctl enable --now warp-svc >/dev/null 2>&1 || systemctl restart warp-svc
   sleep 2
-  systemctl is-active --quiet warp-svc || die "warp-svc failed to start."
+  systemctl is-active --quiet warp-svc || die "warp-svc 启动失败。"
 }
 
 registered() {
@@ -200,26 +200,26 @@ registered() {
 
 ensure_registered() {
   if registered; then
-    say "WARP is already registered."
+    say "WARP 已注册。"
     return
   fi
 
-  say "WARP is not registered. Registering a free WARP account."
+  say "WARP 尚未注册，正在注册免费 WARP 账户。"
   warp registration new >/dev/null 2>&1 \
     || warp register >/dev/null 2>&1 \
-    || die "WARP registration failed."
+    || die "WARP 注册失败。"
 }
 
 set_proxy_mode() {
-  say "Configuring WARP as a local SOCKS5 proxy: $SOCKS_HOST:$SOCKS_PORT"
+  say "正在配置本地 SOCKS5 代理：$SOCKS_HOST:$SOCKS_PORT"
 
   warp mode proxy >/dev/null 2>&1 \
     || warp set-mode proxy >/dev/null 2>&1 \
-    || die "Cannot set WARP proxy mode."
+    || die "无法设置 WARP 代理模式。"
 
   warp proxy port "$SOCKS_PORT" >/dev/null 2>&1 \
     || warp set-proxy-port "$SOCKS_PORT" >/dev/null 2>&1 \
-    || die "Cannot set SOCKS5 port $SOCKS_PORT."
+    || die "无法设置 SOCKS5 端口 $SOCKS_PORT。"
 }
 
 connect_warp() {
@@ -260,10 +260,10 @@ wait_for_warp_health() {
     sleep 3
   done
 
-  say "WARP status output:"
+  say "WARP 状态输出："
   warp status 2>&1 | tee -a "$LOG_FILE" >/dev/null || true
   if cmd_exists ss; then
-    say "Listening sockets near SOCKS5 port:"
+    say "SOCKS5 端口监听情况："
     ss -lntp 2>/dev/null | grep ":$SOCKS_PORT " | tee -a "$LOG_FILE" >/dev/null || true
   fi
   return 1
@@ -274,9 +274,9 @@ save_current_ip() {
   IP="$(warp_ip 2>/dev/null || true)"
   if [ -n "$IP" ]; then
     printf '%s\n' "$IP" > "$STATE_IP_FILE"
-    say "Current WARP exit IP: $IP"
+    say "当前 WARP 出口 IP：$IP"
   else
-    say "Could not read current WARP exit IP."
+    say "未能读取当前 WARP 出口 IP。"
   fi
 }
 
@@ -314,7 +314,7 @@ EOF
 
   systemctl daemon-reload
   systemctl enable --now warp-socks5-rotate.timer >/dev/null
-  say "Daily IP rotation timer created: warp-socks5-rotate.timer"
+  say "每日自动换 IP 定时器已创建：warp-socks5-rotate.timer"
 }
 
 remove_timer() {
@@ -322,7 +322,7 @@ remove_timer() {
   rm -f "$SYSTEMD_SERVICE" "$SYSTEMD_TIMER"
   systemctl daemon-reload || true
   if [ "${1:-}" != "quiet" ]; then
-    say "Daily IP rotation timer removed."
+    say "每日自动换 IP 定时器已移除。"
   fi
 }
 
@@ -338,7 +338,7 @@ uninstall_local_config() {
   disable_proxy_and_disconnect
   rm -rf "$STATE_DIR"
   rm -f "$LOG_FILE"
-  say "Local WARP SOCKS5 config removed. cloudflare-warp package was kept installed."
+  say "本地 WARP SOCKS5 配置已移除，cloudflare-warp 软件包已保留。"
 }
 
 purge_cloudflare_warp() {
@@ -364,7 +364,7 @@ purge_cloudflare_warp() {
     rm -f /etc/yum.repos.d/cloudflare-warp.repo
   fi
   systemctl daemon-reload >/dev/null 2>&1 || true
-  say "cloudflare-warp package and this script config were removed."
+  say "cloudflare-warp 软件包和本脚本相关配置已移除。"
 }
 
 repair_or_install() {
@@ -378,15 +378,15 @@ repair_or_install() {
   connect_warp
 
   if wait_for_warp_health 75; then
-    say "SOCKS5 proxy is healthy: $SOCKS_HOST:$SOCKS_PORT"
+    say "SOCKS5 代理工作正常：$SOCKS_HOST:$SOCKS_PORT"
   else
-    say "Health check failed. Restarting warp-svc and retrying."
+    say "健康检查失败，正在重启 warp-svc 后重试。"
     systemctl restart warp-svc
     sleep 4
     ensure_registered
     set_proxy_mode
     connect_warp
-    wait_for_warp_health 75 || die "SOCKS5 proxy is still unavailable. Check $LOG_FILE and systemctl status warp-svc."
+    wait_for_warp_health 75 || die "SOCKS5 代理仍不可用，请查看 $LOG_FILE 和 systemctl status warp-svc。"
   fi
 
   save_current_ip
@@ -394,7 +394,7 @@ repair_or_install() {
 }
 
 force_new_registration() {
-  say "Re-registering WARP device to try to obtain a new exit IP."
+  say "正在重新注册 WARP 设备以尝试获取新的出口 IP。"
   disconnect_warp
   printf 'y\n' | warp-cli --accept-tos registration delete >/dev/null 2>&1 \
     || printf 'y\n' | warp-cli registration delete >/dev/null 2>&1 \
@@ -416,13 +416,13 @@ rotate_ip() {
   [ -r "$STATE_IP_FILE" ] && OLD_IP="$(sed -n '1p' "$STATE_IP_FILE" || true)"
   [ -z "$OLD_IP" ] && OLD_IP="$(warp_ip 2>/dev/null || true)"
 
-  say "Starting WARP IP rotation. Old IP: ${OLD_IP:-unknown}"
+  say "开始更换 WARP IP，旧 IP：${OLD_IP:-unknown}"
   disconnect_warp
   connect_warp
 
   NEW_IP="$(warp_ip 2>/dev/null || true)"
   if [ -n "$OLD_IP" ] && [ -n "$NEW_IP" ] && [ "$NEW_IP" = "$OLD_IP" ]; then
-    say "IP did not change after reconnect. Trying device re-registration."
+    say "重连后 IP 未变化，尝试重新注册设备。"
     force_new_registration
     set_proxy_mode
     connect_warp
@@ -435,9 +435,9 @@ rotate_ip() {
   set_proxy_mode
   connect_warp
 
-  wait_for_warp_health 75 || die "SOCKS5 health check failed after IP rotation."
+  wait_for_warp_health 75 || die "换 IP 后 SOCKS5 健康检查失败。"
   save_current_ip
-  say "IP rotation completed. SOCKS5 was restarted and is healthy: $SOCKS_HOST:$SOCKS_PORT"
+  say "换 IP 完成，SOCKS5 已重启并恢复正常：$SOCKS_HOST:$SOCKS_PORT"
 }
 
 show_status() {
@@ -452,10 +452,10 @@ show_status() {
   printf '\nSOCKS5: %s:%s\n' "$SOCKS_HOST" "$SOCKS_PORT"
   if wait_for_warp_health 30; then
     IP="$(warp_ip 2>/dev/null || true)"
-    printf 'WARP health: OK\n'
-    printf 'WARP IP: %s\n' "${IP:-unknown}"
+    printf 'WARP 健康状态：正常\n'
+    printf 'WARP 出口 IP：%s\n' "${IP:-unknown}"
   else
-    printf 'WARP health: FAILED\n'
+    printf 'WARP 健康状态：失败\n'
     exit 1
   fi
 }
@@ -495,20 +495,22 @@ interactive_menu() {
 
     CHOICE="$(read_tty '请选择，直接回车默认执行 1: ' '1')"
     case "$CHOICE" in
-      1) repair_or_install ;;
-      2) show_status ;;
-      3) rotate_ip ;;
-      4) install_timer ;;
-      5) remove_timer ;;
+      1) repair_or_install; exit 0 ;;
+      2) show_status; exit 0 ;;
+      3) rotate_ip; exit 0 ;;
+      4) install_timer; exit 0 ;;
+      5) remove_timer; exit 0 ;;
       6)
         if confirm_tty "确认移除定时器、状态、日志并断开 WARP，但保留 cloudflare-warp 软件包吗？"; then
           uninstall_local_config
         fi
+        exit 0
         ;;
       7)
         if confirm_tty "确认彻底卸载 cloudflare-warp 软件包、软件源、定时器、状态和配置吗？"; then
           purge_cloudflare_warp
         fi
+        exit 0
         ;;
       0) exit 0 ;;
       *) printf '无效选择。\n' >/dev/tty ;;
