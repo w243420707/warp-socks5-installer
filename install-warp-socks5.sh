@@ -469,26 +469,26 @@ read_tty() {
 
 confirm_tty() {
   PROMPT="$1"
-  ANSWER="$(read_tty "$PROMPT [y/N]: " "n")"
+  ANSWER="$(read_tty "$PROMPT [y/N/是]: " "n")"
   case "$ANSWER" in
-    y|Y|yes|YES) return 0 ;;
+    y|Y|yes|YES|是|确认) return 0 ;;
     *) return 1 ;;
   esac
 }
 
 interactive_menu() {
   while :; do
-    printf '\nCloudflare WARP SOCKS5\n' >/dev/tty
-    printf '1) Install or repair SOCKS5 127.0.0.1:%s\n' "$SOCKS_PORT" >/dev/tty
-    printf '2) Show status\n' >/dev/tty
-    printf '3) Rotate WARP IP now\n' >/dev/tty
-    printf '4) Enable daily IP rotation timer\n' >/dev/tty
-    printf '5) Disable daily IP rotation timer\n' >/dev/tty
-    printf '6) Uninstall local SOCKS5 config only\n' >/dev/tty
-    printf '7) Purge cloudflare-warp package and config\n' >/dev/tty
-    printf '0) Exit\n\n' >/dev/tty
+    printf '\nCloudflare WARP SOCKS5 管理菜单\n' >/dev/tty
+    printf '1) 安装或修复 SOCKS5 127.0.0.1:%s\n' "$SOCKS_PORT" >/dev/tty
+    printf '2) 查看当前状态\n' >/dev/tty
+    printf '3) 立即更换 WARP IP\n' >/dev/tty
+    printf '4) 启用每日自动更换 IP 定时器\n' >/dev/tty
+    printf '5) 停用每日自动更换 IP 定时器\n' >/dev/tty
+    printf '6) 仅卸载本地 SOCKS5 配置\n' >/dev/tty
+    printf '7) 彻底卸载 cloudflare-warp 和相关配置\n' >/dev/tty
+    printf '0) 退出\n\n' >/dev/tty
 
-    CHOICE="$(read_tty 'Select: ' '')"
+    CHOICE="$(read_tty '请选择: ' '')"
     case "$CHOICE" in
       1) repair_or_install ;;
       2) show_status ;;
@@ -496,32 +496,32 @@ interactive_menu() {
       4) install_timer ;;
       5) remove_timer ;;
       6)
-        if confirm_tty "Remove timer, state, log, and disconnect WARP but keep cloudflare-warp installed?"; then
+        if confirm_tty "确认移除定时器、状态、日志并断开 WARP，但保留 cloudflare-warp 软件包吗？"; then
           uninstall_local_config
         fi
         ;;
       7)
-        if confirm_tty "Purge cloudflare-warp package, repo, timer, state, and config?"; then
+        if confirm_tty "确认彻底卸载 cloudflare-warp 软件包、软件源、定时器、状态和配置吗？"; then
           purge_cloudflare_warp
         fi
         ;;
       0) exit 0 ;;
-      *) printf 'Invalid selection.\n' >/dev/tty ;;
+      *) printf '无效选择。\n' >/dev/tty ;;
     esac
   done
 }
 
 usage() {
   cat <<EOF
-Usage:
+用法:
   sh $0 [menu|install|repair|status|rotate|enable-timer|uninstall-timer|uninstall|purge]
 
-Default action: menu
+默认动作: menu
 SOCKS5: $SOCKS_HOST:$SOCKS_PORT
 
-Uninstall modes:
-  uninstall  Remove this script's timer/state/log and disconnect WARP. Keep cloudflare-warp installed.
-  purge      Remove cloudflare-warp package/repo plus this script's timer/state/log.
+卸载模式:
+  uninstall  移除本脚本创建的定时器、状态、日志并断开 WARP，保留 cloudflare-warp 软件包。
+  purge      移除 cloudflare-warp 软件包/软件源，以及本脚本创建的定时器、状态、日志。
 EOF
   exit 2
 }

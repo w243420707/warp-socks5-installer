@@ -84,29 +84,29 @@ normalize_country() {
 
 region_table() {
   cat <<'EOF'
-MX Mexico
-US United_States
-CA Canada
-BR Brazil
-AR Argentina
-CL Chile
-CO Colombia
-PE Peru
-GB United_Kingdom
-DE Germany
-FR France
-NL Netherlands
-ES Spain
-IT Italy
-SE Sweden
-TR Turkey
-JP Japan
-KR South_Korea
-SG Singapore
-HK Hong_Kong
-TW Taiwan
-AU Australia
-IN India
+MX 墨西哥
+US 美国
+CA 加拿大
+BR 巴西
+AR 阿根廷
+CL 智利
+CO 哥伦比亚
+PE 秘鲁
+GB 英国
+DE 德国
+FR 法国
+NL 荷兰
+ES 西班牙
+IT 意大利
+SE 瑞典
+TR 土耳其
+JP 日本
+KR 韩国
+SG 新加坡
+HK 香港
+TW 台湾
+AU 澳大利亚
+IN 印度
 EOF
 }
 
@@ -148,7 +148,7 @@ country_from_available_number() {
 
 show_available_regions() {
   if [ ! -s "$AVAILABLE_REGIONS_FILE" ]; then
-    printf 'No scanned regions yet. Run scan first.\n'
+    printf '还没有扫描到可用地区，请先执行扫描。\n'
     return 1
   fi
 
@@ -169,14 +169,14 @@ select_target_country() {
 
   if [ -r /dev/tty ]; then
     if [ -s "$AVAILABLE_REGIONS_FILE" ]; then
-      printf '\nScanned available regions:\n'
+      printf '\n已扫描到的可用地区:\n'
       show_available_regions || true
-      printf '\nSelect a scanned region number or type a two-letter country code [MX]: '
+      printf '\n请选择可用地区编号，或输入两位国家代码 [MX]: '
       MENU_SOURCE="available"
     else
-      printf '\nBuilt-in target regions:\n'
+      printf '\n内置目标地区列表:\n'
       show_region_list
-      printf '\nSelect a region number or type a two-letter country code [MX]: '
+      printf '\n请选择地区编号，或输入两位国家代码 [MX]: '
       MENU_SOURCE="builtin"
     fi
     read -r CHOICE </dev/tty || CHOICE=""
@@ -191,7 +191,7 @@ select_target_country() {
         else
           SELECTED="$(country_from_menu_number "$CHOICE" || true)"
         fi
-        [ -n "$SELECTED" ] || die "Invalid region selection: $CHOICE"
+        [ -n "$SELECTED" ] || die "无效地区选择: $CHOICE"
         TARGET_COUNTRY="$SELECTED"
         ;;
     esac
@@ -840,21 +840,21 @@ read_tty() {
 
 interactive_menu() {
   while :; do
-    printf '\nchooseIP WARP SOCKS5\n' >/dev/tty
-    printf '1) Scan endpoints and build available region list\n' >/dev/tty
-    printf '2) Show scanned available regions\n' >/dev/tty
-    printf '3) Choose region and fix WARP SOCKS5\n' >/dev/tty
-    printf '4) Show current status\n' >/dev/tty
-    printf '5) Show built-in region list\n' >/dev/tty
-    printf '6) Remove daily timer\n' >/dev/tty
-    printf '7) Uninstall local chooseIP config only\n' >/dev/tty
-    printf '8) Purge cloudflare-warp package and chooseIP config\n' >/dev/tty
-    printf '0) Exit\n\n' >/dev/tty
+    printf '\nchooseIP WARP SOCKS5 选区菜单\n' >/dev/tty
+    printf '1) 扫描 endpoint 并生成可用地区列表\n' >/dev/tty
+    printf '2) 查看已扫描到的可用地区\n' >/dev/tty
+    printf '3) 选择地区并固定 WARP SOCKS5\n' >/dev/tty
+    printf '4) 查看当前状态\n' >/dev/tty
+    printf '5) 查看内置地区列表\n' >/dev/tty
+    printf '6) 移除每日定时器\n' >/dev/tty
+    printf '7) 仅卸载本地 chooseIP 配置\n' >/dev/tty
+    printf '8) 彻底卸载 cloudflare-warp 和 chooseIP 配置\n' >/dev/tty
+    printf '0) 退出\n\n' >/dev/tty
 
-    CHOICE="$(read_tty 'Select: ' '')"
+    CHOICE="$(read_tty '请选择: ' '')"
     case "$CHOICE" in
       1)
-        LIMIT="$(read_tty "Scan how many endpoints? [$SCAN_LIMIT]: " "$SCAN_LIMIT")"
+        LIMIT="$(read_tty "要扫描多少个 endpoint？[$SCAN_LIMIT]: " "$SCAN_LIMIT")"
         SCAN_LIMIT="$LIMIT"
         scan_regions
         ;;
@@ -875,22 +875,22 @@ interactive_menu() {
         remove_timer
         ;;
       7)
-        ANSWER="$(read_tty 'Remove timer, scan/state/log, and disconnect WARP but keep cloudflare-warp installed? [y/N]: ' 'n')"
+        ANSWER="$(read_tty '确认移除定时器、扫描结果、状态、日志并断开 WARP，但保留 cloudflare-warp 软件包吗？[y/N/是]: ' 'n')"
         case "$ANSWER" in
-          y|Y|yes|YES) uninstall_local_config ;;
+          y|Y|yes|YES|是|确认) uninstall_local_config ;;
         esac
         ;;
       8)
-        ANSWER="$(read_tty 'Purge cloudflare-warp package, repo, timer, scan/state/log, and config? [y/N]: ' 'n')"
+        ANSWER="$(read_tty '确认彻底卸载 cloudflare-warp 软件包、软件源、定时器、扫描结果、状态和配置吗？[y/N/是]: ' 'n')"
         case "$ANSWER" in
-          y|Y|yes|YES) purge_cloudflare_warp ;;
+          y|Y|yes|YES|是|确认) purge_cloudflare_warp ;;
         esac
         ;;
       0)
         exit 0
         ;;
       *)
-        printf 'Invalid selection.\n' >/dev/tty
+        printf '无效选择。\n' >/dev/tty
         ;;
     esac
   done
@@ -921,25 +921,25 @@ main() {
 
 usage() {
   cat <<EOF
-Usage:
+用法:
   sh $0 [menu|choose|install|scan|list|list-available|status|uninstall-timer|uninstall|purge]
 
-Environment:
-  TARGET_COUNTRY       Two-letter target country code. Default: MX
-  MAX_ATTEMPTS         Max country-selection attempts. Default: 30
-  SCAN_LIMIT           Max endpoints to scan. Default: 100
-  HARD_ROTATE_EVERY    Re-register every N attempts. Default: 3
-  KEEP_DAILY_TIMER     Set to 1 to keep daily country checks. Default: 0
-  SOCKS_PORT           Local SOCKS5 port. Default: 40000
-  ENDPOINTS            Space/comma separated endpoint list, for example "162.159.192.1:2408 188.114.96.1:2408"
-  ENDPOINT_FILE        File with one endpoint per line
-  ENDPOINT_LIST_URL    URL returning one endpoint per line
-  ENDPOINT_PORT        Port used when endpoint lacks a port. Default: 2408
-  TRY_DEFAULT_ENDPOINTS Try built-in common WARP endpoint candidates. Default: 1
+环境变量:
+  TARGET_COUNTRY        两位目标国家/地区代码，默认 MX。
+  MAX_ATTEMPTS          选区最大尝试次数，默认 30。
+  SCAN_LIMIT            扫描 endpoint 的最大数量，默认 100。
+  HARD_ROTATE_EVERY     每尝试 N 次重新注册一次设备，默认 3。
+  KEEP_DAILY_TIMER      设为 1 时保留每日地区检查，默认 0。
+  SOCKS_PORT            本地 SOCKS5 端口，默认 40000。
+  ENDPOINTS             endpoint 列表，支持空格/逗号分隔，例如 "162.159.192.1:2408 188.114.96.1:2408"。
+  ENDPOINT_FILE         endpoint 文件路径，每行一个 endpoint。
+  ENDPOINT_LIST_URL     endpoint 列表 URL，每行一个 endpoint。
+  ENDPOINT_PORT         endpoint 未写端口时使用的端口，默认 2408。
+  TRY_DEFAULT_ENDPOINTS 是否尝试内置常见 WARP endpoint，默认 1。
 
-Uninstall modes:
-  uninstall  Remove this script's timer/scan/state/log and disconnect WARP. Keep cloudflare-warp installed.
-  purge      Remove cloudflare-warp package/repo plus this script's timer/scan/state/log.
+卸载模式:
+  uninstall  移除本脚本创建的定时器、扫描结果、状态、日志并断开 WARP，保留 cloudflare-warp 软件包。
+  purge      移除 cloudflare-warp 软件包/软件源，以及本脚本创建的定时器、扫描结果、状态、日志。
 EOF
   exit 2
 }

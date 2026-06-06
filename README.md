@@ -14,33 +14,33 @@ Default SOCKS5 endpoint:
 curl -fsSL https://raw.githubusercontent.com/w243420707/warp-socks5-installer/main/install-warp-socks5.sh | sudo sh
 ```
 
-The installer opens an interactive menu by default. It can install/repair, show status, rotate the WARP IP, enable/disable the daily timer, uninstall local config, or purge `cloudflare-warp`.
+安装脚本默认打开中文交互菜单，可安装/修复、查看状态、立即换 IP、启用/停用每日定时器、仅卸载本地配置或彻底卸载 `cloudflare-warp`。
 
 ## Try To Choose WARP Exit Country
 
-Cloudflare WARP does not officially support selecting an exit country. This script shows a region list, lets you choose a target, tries WARP endpoint candidates first, and stops when the detected exit IP country matches the target. After a successful match, it keeps that endpoint fixed and does not rotate daily by default.
+Cloudflare WARP 官方并不支持指定出口国家/地区。这个脚本会打开中文交互菜单，可先扫描 endpoint 生成本机实测可用地区，再选择目标地区并固定 WARP SOCKS5。命中后默认固定住，不会每天自动更换。
 
-Interactive menu:
+中文交互菜单:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/w243420707/warp-socks5-installer/main/chooseIP-warp-socks5.sh | sudo env MAX_ATTEMPTS=50 SCAN_LIMIT=100 sh
 ```
 
-Menu options include scanning endpoints, showing scanned regions, choosing a region to fix, status, and timer removal.
+菜单包含扫描 endpoint、查看可用地区、选择地区并固定、查看状态、移除定时器和卸载。
 
-Directly choose Mexico:
+直接选择墨西哥:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/w243420707/warp-socks5-installer/main/chooseIP-warp-socks5.sh | sudo env TARGET_COUNTRY=MX MAX_ATTEMPTS=50 sh
 ```
 
-With endpoint candidates:
+使用自定义 endpoint 候选列表:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/w243420707/warp-socks5-installer/main/chooseIP-warp-socks5.sh | sudo env TARGET_COUNTRY=MX MAX_ATTEMPTS=50 ENDPOINTS="162.159.192.1:2408 188.114.96.1:2408" sh
 ```
 
-Or use a file with one endpoint per line:
+也可以使用每行一个 endpoint 的文件:
 
 ```sh
 sudo env TARGET_COUNTRY=MX ENDPOINT_FILE=/root/mx-endpoints.txt sh chooseIP-warp-socks5.sh choose
@@ -56,7 +56,7 @@ sudo sh install-warp-socks5.sh uninstall
 sudo sh install-warp-socks5.sh purge
 ```
 
-For the country chooser:
+选区脚本命令:
 
 ```sh
 sudo sh chooseIP-warp-socks5.sh scan
@@ -69,6 +69,6 @@ sudo sh chooseIP-warp-socks5.sh uninstall
 sudo sh chooseIP-warp-socks5.sh purge
 ```
 
-The installer creates a systemd timer named `warp-socks5-rotate.timer` to rotate the WARP exit IP daily and restart the SOCKS5 service.
+安装脚本会创建 `warp-socks5-rotate.timer`，用于每天更换 WARP 出口 IP 并重启 SOCKS5。
 
-The country chooser stores the last successful endpoint in `/var/lib/chooseip-warp-socks5/state` and tries it first next time. It does not create a daily timer unless `KEEP_DAILY_TIMER=1` is set.
+选区脚本会把最后成功的 endpoint 保存到 `/var/lib/chooseip-warp-socks5/state`，下次优先尝试。除非设置 `KEEP_DAILY_TIMER=1`，否则不会创建每日定时器。
