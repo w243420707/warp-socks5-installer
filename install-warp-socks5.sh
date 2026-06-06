@@ -479,7 +479,7 @@ confirm_tty() {
 interactive_menu() {
   while :; do
     printf '\nCloudflare WARP SOCKS5 管理菜单\n' >/dev/tty
-    printf '1) 安装或修复 SOCKS5 127.0.0.1:%s\n' "$SOCKS_PORT" >/dev/tty
+    printf '1) 安装或修复 SOCKS5 127.0.0.1:%s（默认，包含每日自动换 IP 和重启 WARP）\n' "$SOCKS_PORT" >/dev/tty
     printf '2) 查看当前状态\n' >/dev/tty
     printf '3) 立即更换 WARP IP\n' >/dev/tty
     printf '4) 启用每日自动更换 IP 定时器\n' >/dev/tty
@@ -488,7 +488,7 @@ interactive_menu() {
     printf '7) 彻底卸载 cloudflare-warp 和相关配置\n' >/dev/tty
     printf '0) 退出\n\n' >/dev/tty
 
-    CHOICE="$(read_tty '请选择: ' '')"
+    CHOICE="$(read_tty '请选择，直接回车默认执行 1: ' '1')"
     case "$CHOICE" in
       1) repair_or_install ;;
       2) show_status ;;

@@ -14,7 +14,7 @@ Cloudflare WARP SOCKS5 一键安装脚本。
 curl -fsSL https://raw.githubusercontent.com/w243420707/warp-socks5-installer/main/install-warp-socks5.sh | sudo sh
 ```
 
-脚本默认打开中文交互菜单，可安装/修复、查看状态、立即换 IP、启用/停用每日自动换 IP、卸载本地配置或彻底卸载 `cloudflare-warp`。
+脚本默认打开中文交互菜单。直接回车会执行默认安装/修复，并启用每日自动换 IP 与重启 WARP。菜单也可查看状态、立即换 IP、启用/停用每日自动换 IP、卸载本地配置或彻底卸载 `cloudflare-warp`。
 
 ## 常用命令
 
