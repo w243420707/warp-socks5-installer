@@ -4,12 +4,15 @@
 #
 # Important:
 #   Cloudflare WARP does not officially support selecting an exit country.
-#   This script repeatedly rotates the WARP device/session and checks the
-#   resulting exit IP country. It stops when TARGET_COUNTRY is reached.
+#   This script first tries a list of WARP custom endpoints, checks the
+#   resulting exit IP country, and stops when TARGET_COUNTRY is reached.
+#   If the endpoint list does not hit the target, it falls back to session
+#   rotation and device re-registration.
 #
 # Usage:
 #   TARGET_COUNTRY=MX sudo sh chooseIP-warp-socks5.sh
 #   TARGET_COUNTRY=MX MAX_ATTEMPTS=30 sudo sh chooseIP-warp-socks5.sh choose
+#   ENDPOINTS="162.159.192.1:2408 188.114.96.1:2408" sudo sh chooseIP-warp-socks5.sh
 #   sudo sh chooseIP-warp-socks5.sh status
 #   sudo sh chooseIP-warp-socks5.sh uninstall-timer
 
@@ -20,8 +23,14 @@ SOCKS_PORT="${SOCKS_PORT:-40000}"
 TARGET_COUNTRY="${TARGET_COUNTRY:-MX}"
 MAX_ATTEMPTS="${MAX_ATTEMPTS:-30}"
 HARD_ROTATE_EVERY="${HARD_ROTATE_EVERY:-3}"
+ENDPOINT_PORT="${ENDPOINT_PORT:-2408}"
+ENDPOINTS="${ENDPOINTS:-}"
+ENDPOINT_FILE="${ENDPOINT_FILE:-}"
+ENDPOINT_LIST_URL="${ENDPOINT_LIST_URL:-}"
+TRY_DEFAULT_ENDPOINTS="${TRY_DEFAULT_ENDPOINTS:-1}"
 STATE_DIR="/var/lib/chooseip-warp-socks5"
 STATE_FILE="$STATE_DIR/state"
+ENDPOINT_CACHE_FILE="$STATE_DIR/endpoints"
 LOG_FILE="/var/log/chooseip-warp-socks5.log"
 SYSTEMD_SERVICE="/etc/systemd/system/chooseip-warp-socks5.service"
 SYSTEMD_TIMER="/etc/systemd/system/chooseip-warp-socks5.timer"
@@ -43,7 +52,7 @@ die() {
 need_root() {
   if [ "$(id -u)" -ne 0 ]; then
     if command -v sudo >/dev/null 2>&1; then
-      exec sudo env TARGET_COUNTRY="$TARGET_COUNTRY" MAX_ATTEMPTS="$MAX_ATTEMPTS" HARD_ROTATE_EVERY="$HARD_ROTATE_EVERY" SOCKS_PORT="$SOCKS_PORT" sh "$0" "$@"
+      exec sudo env TARGET_COUNTRY="$TARGET_COUNTRY" MAX_ATTEMPTS="$MAX_ATTEMPTS" HARD_ROTATE_EVERY="$HARD_ROTATE_EVERY" SOCKS_PORT="$SOCKS_PORT" ENDPOINT_PORT="$ENDPOINT_PORT" ENDPOINTS="$ENDPOINTS" ENDPOINT_FILE="$ENDPOINT_FILE" ENDPOINT_LIST_URL="$ENDPOINT_LIST_URL" TRY_DEFAULT_ENDPOINTS="$TRY_DEFAULT_ENDPOINTS" sh "$0" "$@"
     fi
     die "Please run as root, or install sudo first."
   fi
@@ -293,9 +302,128 @@ save_state() {
 target_country=$TARGET_COUNTRY
 exit_ip=$1
 exit_country=$2
+endpoint=${3:-auto}
 updated_at=$(date '+%F %T')
 socks5=$SOCKS_HOST:$SOCKS_PORT
 EOF
+}
+
+state_value() {
+  KEY="$1"
+  [ -r "$STATE_FILE" ] || return 1
+  sed -n "s/^$KEY=//p" "$STATE_FILE" | sed -n '1p'
+}
+
+normalize_endpoint() {
+  EP="$(printf '%s' "$1" | tr -d '\r' | sed 's/^[ 	]*//;s/[ 	]*$//')"
+  [ -n "$EP" ] || return 1
+  case "$EP" in
+    \#*) return 1 ;;
+  esac
+  case "$EP" in
+    *:*) printf '%s\n' "$EP" ;;
+    *) printf '%s:%s\n' "$EP" "$ENDPOINT_PORT" ;;
+  esac
+}
+
+write_default_endpoints() {
+  OUT="$1"
+  for BASE in 162.159.192 162.159.193 162.159.195 188.114.96 188.114.97; do
+    for N in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+      printf '%s.%s:%s\n' "$BASE" "$N" "$ENDPOINT_PORT" >>"$OUT"
+    done
+  done
+}
+
+build_endpoint_list() {
+  install -d -m 0755 "$STATE_DIR"
+  TMP="$ENDPOINT_CACHE_FILE.tmp"
+  : >"$TMP"
+
+  SUCCESS_ENDPOINT="$(state_value endpoint 2>/dev/null || true)"
+  if [ -n "$SUCCESS_ENDPOINT" ] && [ "$SUCCESS_ENDPOINT" != "auto" ]; then
+    normalize_endpoint "$SUCCESS_ENDPOINT" >>"$TMP" 2>/dev/null || true
+  fi
+
+  if [ -n "$ENDPOINTS" ]; then
+    for EP in $(printf '%s' "$ENDPOINTS" | tr ',;' '  '); do
+      normalize_endpoint "$EP" >>"$TMP" 2>/dev/null || true
+    done
+  fi
+
+  if [ -n "$ENDPOINT_FILE" ] && [ -r "$ENDPOINT_FILE" ]; then
+    while IFS= read -r EP; do
+      normalize_endpoint "$EP" >>"$TMP" 2>/dev/null || true
+    done <"$ENDPOINT_FILE"
+  fi
+
+  if [ -n "$ENDPOINT_LIST_URL" ]; then
+    curl --silent --show-error --max-time 20 "$ENDPOINT_LIST_URL" 2>>"$LOG_FILE" \
+      | while IFS= read -r EP; do
+          normalize_endpoint "$EP" >>"$TMP" 2>/dev/null || true
+        done
+  fi
+
+  if [ "$TRY_DEFAULT_ENDPOINTS" = "1" ]; then
+    write_default_endpoints "$TMP"
+  fi
+
+  awk '!seen[$0]++' "$TMP" >"$ENDPOINT_CACHE_FILE"
+  rm -f "$TMP"
+  [ -s "$ENDPOINT_CACHE_FILE" ]
+}
+
+set_custom_endpoint() {
+  ENDPOINT="$1"
+  say "Trying WARP custom endpoint: $ENDPOINT"
+  warp set-custom-endpoint "$ENDPOINT" >/dev/null 2>&1 \
+    || warp tunnel endpoint set "$ENDPOINT" >/dev/null 2>&1 \
+    || warp endpoint set "$ENDPOINT" >/dev/null 2>&1 \
+    || {
+      say "This warp-cli build does not accept custom endpoint commands."
+      return 2
+    }
+}
+
+restart_proxy_after_endpoint_change() {
+  disconnect_warp
+  systemctl restart warp-svc >/dev/null 2>&1 || true
+  sleep 5
+  ensure_warp_service
+  set_proxy_mode
+  connect_warp
+}
+
+test_current_exit() {
+  IP="$(warp_ip 2>/dev/null || true)"
+  COUNTRY="UNKNOWN"
+  [ -n "$IP" ] && COUNTRY="$(country_for_ip "$IP")"
+  printf '%s %s\n' "${IP:-unknown}" "$COUNTRY"
+}
+
+try_endpoint_once() {
+  ENDPOINT="$1"
+  set_custom_endpoint "$ENDPOINT" || return $?
+  restart_proxy_after_endpoint_change
+  if ! wait_for_warp_health 75; then
+    say "Endpoint $ENDPOINT did not produce a healthy SOCKS5 proxy."
+    return 1
+  fi
+
+  RESULT="$(test_current_exit)"
+  IP="$(printf '%s\n' "$RESULT" | awk '{print $1}')"
+  COUNTRY="$(printf '%s\n' "$RESULT" | awk '{print $2}')"
+  say "Endpoint $ENDPOINT result: WARP exit IP=$IP, country=$COUNTRY, target=$TARGET_COUNTRY"
+
+  if [ "$COUNTRY" = "$TARGET_COUNTRY" ]; then
+    save_state "$IP" "$COUNTRY" "$ENDPOINT"
+    install_timer
+    say "Target country reached with endpoint $ENDPOINT. SOCKS5 is ready: $SOCKS_HOST:$SOCKS_PORT"
+    return 0
+  fi
+
+  save_state "$IP" "$COUNTRY" "$ENDPOINT"
+  return 1
 }
 
 soft_rotate() {
@@ -333,6 +461,29 @@ choose_country() {
 
   prepare_socks5
 
+  if build_endpoint_list; then
+    say "Built endpoint candidate list: $ENDPOINT_CACHE_FILE"
+    ATTEMPT=1
+    while IFS= read -r ENDPOINT; do
+      [ -n "$ENDPOINT" ] || continue
+      [ "$ATTEMPT" -le "$MAX_ATTEMPTS" ] || break
+      say "Endpoint attempt $ATTEMPT/$MAX_ATTEMPTS"
+      if try_endpoint_once "$ENDPOINT"; then
+        return 0
+      elif [ "$?" -eq 2 ]; then
+        say "Custom endpoint mode is unavailable. Falling back to WARP session rotation."
+        break
+      fi
+      if [ $(( ATTEMPT % HARD_ROTATE_EVERY )) -eq 0 ]; then
+        hard_rotate
+      fi
+      ATTEMPT=$(( ATTEMPT + 1 ))
+    done <"$ENDPOINT_CACHE_FILE"
+    say "Endpoint candidate list did not reach $TARGET_COUNTRY. Falling back to WARP session rotation."
+  else
+    say "No endpoint candidates were available. Falling back to WARP session rotation."
+  fi
+
   ATTEMPT=1
   while [ "$ATTEMPT" -le "$MAX_ATTEMPTS" ]; do
     IP="$(warp_ip 2>/dev/null || true)"
@@ -341,14 +492,16 @@ choose_country() {
     say "Attempt $ATTEMPT/$MAX_ATTEMPTS: WARP exit IP=${IP:-unknown}, country=$COUNTRY, target=$TARGET_COUNTRY"
 
     if [ "$COUNTRY" = "$TARGET_COUNTRY" ]; then
-      save_state "$IP" "$COUNTRY"
+      CURRENT_ENDPOINT="$(state_value endpoint 2>/dev/null || printf '%s' auto)"
+      save_state "$IP" "$COUNTRY" "$CURRENT_ENDPOINT"
       install_timer
       say "Target country reached. SOCKS5 is ready: $SOCKS_HOST:$SOCKS_PORT"
       return 0
     fi
 
     if [ "$ATTEMPT" -ge "$MAX_ATTEMPTS" ]; then
-      save_state "${IP:-unknown}" "$COUNTRY"
+      CURRENT_ENDPOINT="$(state_value endpoint 2>/dev/null || printf '%s' auto)"
+      save_state "${IP:-unknown}" "$COUNTRY" "$CURRENT_ENDPOINT"
       die "Could not reach target country $TARGET_COUNTRY after $MAX_ATTEMPTS attempts. WARP may not be routing this VPS to that country."
     fi
 
@@ -381,10 +534,15 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-Environment=TARGET_COUNTRY=$TARGET_COUNTRY
-Environment=MAX_ATTEMPTS=$MAX_ATTEMPTS
-Environment=HARD_ROTATE_EVERY=$HARD_ROTATE_EVERY
-Environment=SOCKS_PORT=$SOCKS_PORT
+Environment="TARGET_COUNTRY=$TARGET_COUNTRY"
+Environment="MAX_ATTEMPTS=$MAX_ATTEMPTS"
+Environment="HARD_ROTATE_EVERY=$HARD_ROTATE_EVERY"
+Environment="SOCKS_PORT=$SOCKS_PORT"
+Environment="ENDPOINT_PORT=$ENDPOINT_PORT"
+Environment="ENDPOINTS=$ENDPOINTS"
+Environment="ENDPOINT_FILE=$ENDPOINT_FILE"
+Environment="ENDPOINT_LIST_URL=$ENDPOINT_LIST_URL"
+Environment="TRY_DEFAULT_ENDPOINTS=$TRY_DEFAULT_ENDPOINTS"
 ExecStart=/bin/sh $SELF_PATH choose
 EOF
 
@@ -422,6 +580,8 @@ show_status() {
   printf 'Target country: %s\n' "$(normalize_country "$TARGET_COUNTRY")"
   printf 'Current IP: %s\n' "${IP:-unknown}"
   printf 'Current country: %s\n' "$COUNTRY"
+  printf 'Last endpoint: %s\n' "$(state_value endpoint 2>/dev/null || printf '%s' unknown)"
+  [ -r "$ENDPOINT_CACHE_FILE" ] && printf 'Endpoint cache: %s\n' "$ENDPOINT_CACHE_FILE"
   [ -r "$STATE_FILE" ] && printf 'State file: %s\n' "$STATE_FILE"
 }
 
@@ -443,6 +603,11 @@ Environment:
   MAX_ATTEMPTS         Max country-selection attempts. Default: 30
   HARD_ROTATE_EVERY    Re-register every N attempts. Default: 3
   SOCKS_PORT           Local SOCKS5 port. Default: 40000
+  ENDPOINTS            Space/comma separated endpoint list, for example "162.159.192.1:2408 188.114.96.1:2408"
+  ENDPOINT_FILE        File with one endpoint per line
+  ENDPOINT_LIST_URL    URL returning one endpoint per line
+  ENDPOINT_PORT        Port used when endpoint lacks a port. Default: 2408
+  TRY_DEFAULT_ENDPOINTS Try built-in common WARP endpoint candidates. Default: 1
 EOF
       exit 2
       ;;

@@ -24,6 +24,18 @@ Example for Mexico:
 curl -fsSL https://raw.githubusercontent.com/w243420707/warp-socks5-installer/main/chooseIP-warp-socks5.sh | sudo env TARGET_COUNTRY=MX MAX_ATTEMPTS=30 sh
 ```
 
+With endpoint candidates:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/w243420707/warp-socks5-installer/main/chooseIP-warp-socks5.sh | sudo env TARGET_COUNTRY=MX MAX_ATTEMPTS=50 ENDPOINTS="162.159.192.1:2408 188.114.96.1:2408" sh
+```
+
+Or use a file with one endpoint per line:
+
+```sh
+sudo env TARGET_COUNTRY=MX ENDPOINT_FILE=/root/mx-endpoints.txt sh chooseIP-warp-socks5.sh choose
+```
+
 ## Commands
 
 ```sh
@@ -42,4 +54,4 @@ sudo sh chooseIP-warp-socks5.sh uninstall-timer
 
 The installer creates a systemd timer named `warp-socks5-rotate.timer` to rotate the WARP exit IP daily and restart the SOCKS5 service.
 
-The country chooser creates a systemd timer named `chooseip-warp-socks5.timer` to check the target country daily and rotate again if needed.
+The country chooser creates a systemd timer named `chooseip-warp-socks5.timer` to check the target country daily and rotate again if needed. It stores the last successful endpoint in `/var/lib/chooseip-warp-socks5/state` and tries it first next time.
