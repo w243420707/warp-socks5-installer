@@ -26,7 +26,8 @@ Cloudflare WARP 官方并不支持指定出口国家/地区。这个脚本会打
 curl -fsSL https://raw.githubusercontent.com/w243420707/warp-socks5-installer/main/chooseIP-warp-socks5.sh | sudo env MAX_ATTEMPTS=50 SCAN_LIMIT=100 sh
 ```
 
-菜单包含扫描 endpoint、查看可用地区、选择地区并固定、查看状态、移除定时器和卸载。
+菜单包含扫描 endpoint、查看可用地区、选择地区并固定、查看状态、清理旧定时器和卸载。
+扫描默认使用快速模式：切换 endpoint 后只断开重连，不每次重启 `warp-svc`；失败时才重启兜底。
 
 直接选择墨西哥:
 
@@ -60,6 +61,7 @@ sudo sh install-warp-socks5.sh purge
 
 ```sh
 sudo sh chooseIP-warp-socks5.sh scan
+sudo env SCAN_LIMIT=100 SCAN_WAIT_SECONDS=8 sh chooseIP-warp-socks5.sh scan
 sudo sh chooseIP-warp-socks5.sh list-available
 sudo sh chooseIP-warp-socks5.sh list
 sudo env TARGET_COUNTRY=MX sh chooseIP-warp-socks5.sh status

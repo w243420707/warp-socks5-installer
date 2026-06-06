@@ -31,6 +31,8 @@ fi
 TARGET_COUNTRY="${TARGET_COUNTRY:-MX}"
 MAX_ATTEMPTS="${MAX_ATTEMPTS:-30}"
 SCAN_LIMIT="${SCAN_LIMIT:-100}"
+SCAN_FAST="${SCAN_FAST:-1}"
+SCAN_WAIT_SECONDS="${SCAN_WAIT_SECONDS:-12}"
 HARD_ROTATE_EVERY="${HARD_ROTATE_EVERY:-3}"
 ENDPOINT_PORT="${ENDPOINT_PORT:-2408}"
 ENDPOINTS="${ENDPOINTS:-}"
@@ -64,9 +66,9 @@ need_root() {
   if [ "$(id -u)" -ne 0 ]; then
     if command -v sudo >/dev/null 2>&1; then
       if [ "$TARGET_COUNTRY_WAS_SET" = "1" ]; then
-        exec sudo env TARGET_COUNTRY="$TARGET_COUNTRY" TARGET_COUNTRY_WAS_SET=1 MAX_ATTEMPTS="$MAX_ATTEMPTS" HARD_ROTATE_EVERY="$HARD_ROTATE_EVERY" SOCKS_PORT="$SOCKS_PORT" ENDPOINT_PORT="$ENDPOINT_PORT" ENDPOINTS="$ENDPOINTS" ENDPOINT_FILE="$ENDPOINT_FILE" ENDPOINT_LIST_URL="$ENDPOINT_LIST_URL" TRY_DEFAULT_ENDPOINTS="$TRY_DEFAULT_ENDPOINTS" sh "$0" "$@"
+        exec sudo env TARGET_COUNTRY="$TARGET_COUNTRY" TARGET_COUNTRY_WAS_SET=1 MAX_ATTEMPTS="$MAX_ATTEMPTS" SCAN_LIMIT="$SCAN_LIMIT" SCAN_FAST="$SCAN_FAST" SCAN_WAIT_SECONDS="$SCAN_WAIT_SECONDS" HARD_ROTATE_EVERY="$HARD_ROTATE_EVERY" SOCKS_PORT="$SOCKS_PORT" ENDPOINT_PORT="$ENDPOINT_PORT" ENDPOINTS="$ENDPOINTS" ENDPOINT_FILE="$ENDPOINT_FILE" ENDPOINT_LIST_URL="$ENDPOINT_LIST_URL" TRY_DEFAULT_ENDPOINTS="$TRY_DEFAULT_ENDPOINTS" sh "$0" "$@"
       fi
-      exec sudo env TARGET_COUNTRY_WAS_SET=0 MAX_ATTEMPTS="$MAX_ATTEMPTS" HARD_ROTATE_EVERY="$HARD_ROTATE_EVERY" SOCKS_PORT="$SOCKS_PORT" ENDPOINT_PORT="$ENDPOINT_PORT" ENDPOINTS="$ENDPOINTS" ENDPOINT_FILE="$ENDPOINT_FILE" ENDPOINT_LIST_URL="$ENDPOINT_LIST_URL" TRY_DEFAULT_ENDPOINTS="$TRY_DEFAULT_ENDPOINTS" sh "$0" "$@"
+      exec sudo env TARGET_COUNTRY_WAS_SET=0 MAX_ATTEMPTS="$MAX_ATTEMPTS" SCAN_LIMIT="$SCAN_LIMIT" SCAN_FAST="$SCAN_FAST" SCAN_WAIT_SECONDS="$SCAN_WAIT_SECONDS" HARD_ROTATE_EVERY="$HARD_ROTATE_EVERY" SOCKS_PORT="$SOCKS_PORT" ENDPOINT_PORT="$ENDPOINT_PORT" ENDPOINTS="$ENDPOINTS" ENDPOINT_FILE="$ENDPOINT_FILE" ENDPOINT_LIST_URL="$ENDPOINT_LIST_URL" TRY_DEFAULT_ENDPOINTS="$TRY_DEFAULT_ENDPOINTS" sh "$0" "$@"
     fi
     die "Please run as root, or install sudo first."
   fi
@@ -527,6 +529,12 @@ restart_proxy_after_endpoint_change() {
   connect_warp
 }
 
+fast_apply_endpoint_for_scan() {
+  disconnect_warp
+  set_proxy_mode
+  connect_warp
+}
+
 test_current_exit() {
   IP="$(warp_ip 2>/dev/null || true)"
   COUNTRY="UNKNOWN"
@@ -569,16 +577,29 @@ refresh_available_regions() {
 scan_endpoint_once() {
   ENDPOINT="$1"
   set_custom_endpoint "$ENDPOINT" || return $?
-  restart_proxy_after_endpoint_change
+  if [ "$SCAN_FAST" = "1" ]; then
+    fast_apply_endpoint_for_scan
+  else
+    restart_proxy_after_endpoint_change
+  fi
 
   OK=0
   IP="unknown"
   COUNTRY="UNKNOWN"
-  if wait_for_warp_health 60; then
+  if wait_for_warp_health "$SCAN_WAIT_SECONDS"; then
     RESULT="$(test_current_exit)"
     IP="$(printf '%s\n' "$RESULT" | awk '{print $1}')"
     COUNTRY="$(printf '%s\n' "$RESULT" | awk '{print $2}')"
     [ "$COUNTRY" != "UNKNOWN" ] && OK=1
+  elif [ "$SCAN_FAST" = "1" ]; then
+    say "快速扫描未连通，重启 WARP 服务后再试一次: $ENDPOINT"
+    restart_proxy_after_endpoint_change
+    if wait_for_warp_health "$SCAN_WAIT_SECONDS"; then
+      RESULT="$(test_current_exit)"
+      IP="$(printf '%s\n' "$RESULT" | awk '{print $1}')"
+      COUNTRY="$(printf '%s\n' "$RESULT" | awk '{print $2}')"
+      [ "$COUNTRY" != "UNKNOWN" ] && OK=1
+    fi
   fi
 
   printf '%s,%s,%s,%s,%s\n' "$ENDPOINT" "$IP" "$COUNTRY" "$OK" "$(date '+%F %T')" >>"$SCAN_RESULTS_FILE"
@@ -593,7 +614,7 @@ scan_regions() {
   install -d -m 0755 "$STATE_DIR"
   printf 'endpoint,exit_ip,country,ok,checked_at\n' >"$SCAN_RESULTS_FILE"
 
-  say "Starting endpoint scan. Limit: $SCAN_LIMIT. Results: $SCAN_RESULTS_FILE"
+  say "开始扫描 endpoint。数量: $SCAN_LIMIT，快速模式: $SCAN_FAST，每个最多等待: ${SCAN_WAIT_SECONDS}s，结果: $SCAN_RESULTS_FILE"
   COUNT=0
   while IFS= read -r ENDPOINT; do
     [ -n "$ENDPOINT" ] || continue
@@ -807,6 +828,8 @@ interactive_menu() {
       1)
         LIMIT="$(read_tty "要扫描多少个 endpoint？[$SCAN_LIMIT]: " "$SCAN_LIMIT")"
         SCAN_LIMIT="$LIMIT"
+        WAIT_INPUT="$(read_tty "每个 endpoint 最多等待几秒？[$SCAN_WAIT_SECONDS]: " "$SCAN_WAIT_SECONDS")"
+        SCAN_WAIT_SECONDS="$WAIT_INPUT"
         scan_regions
         ;;
       2)
@@ -879,6 +902,8 @@ usage() {
   TARGET_COUNTRY        两位目标国家/地区代码，默认 MX。
   MAX_ATTEMPTS          选区最大尝试次数，默认 30。
   SCAN_LIMIT            扫描 endpoint 的最大数量，默认 100。
+  SCAN_FAST             扫描时不每次重启 warp-svc，失败再重启兜底。默认 1。
+  SCAN_WAIT_SECONDS     每个 endpoint 健康检查最多等待秒数，默认 12。
   HARD_ROTATE_EVERY     每尝试 N 次重新注册一次设备，默认 3。
   SOCKS_PORT            本地 SOCKS5 端口，默认 40000。
   ENDPOINTS             endpoint 列表，支持空格/逗号分隔，例如 "162.159.192.1:2408 188.114.96.1:2408"。
