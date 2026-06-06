@@ -16,12 +16,18 @@ curl -fsSL https://raw.githubusercontent.com/w243420707/warp-socks5-installer/ma
 
 ## Try To Choose WARP Exit Country
 
-Cloudflare WARP does not officially support selecting an exit country. This command repeatedly rotates the WARP session/device and stops only when the detected exit IP country matches the target.
+Cloudflare WARP does not officially support selecting an exit country. This script shows a region list, lets you choose a target, tries WARP endpoint candidates first, and stops when the detected exit IP country matches the target. After a successful match, it keeps that endpoint fixed and does not rotate daily by default.
 
-Example for Mexico:
+Interactive region menu:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/w243420707/warp-socks5-installer/main/chooseIP-warp-socks5.sh | sudo env TARGET_COUNTRY=MX MAX_ATTEMPTS=30 sh
+curl -fsSL https://raw.githubusercontent.com/w243420707/warp-socks5-installer/main/chooseIP-warp-socks5.sh | sudo env MAX_ATTEMPTS=50 sh
+```
+
+Directly choose Mexico:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/w243420707/warp-socks5-installer/main/chooseIP-warp-socks5.sh | sudo env TARGET_COUNTRY=MX MAX_ATTEMPTS=50 sh
 ```
 
 With endpoint candidates:
@@ -47,6 +53,7 @@ sudo sh install-warp-socks5.sh uninstall-timer
 For the country chooser:
 
 ```sh
+sudo sh chooseIP-warp-socks5.sh list
 sudo env TARGET_COUNTRY=MX sh chooseIP-warp-socks5.sh status
 sudo env TARGET_COUNTRY=MX MAX_ATTEMPTS=30 sh chooseIP-warp-socks5.sh choose
 sudo sh chooseIP-warp-socks5.sh uninstall-timer
@@ -54,4 +61,4 @@ sudo sh chooseIP-warp-socks5.sh uninstall-timer
 
 The installer creates a systemd timer named `warp-socks5-rotate.timer` to rotate the WARP exit IP daily and restart the SOCKS5 service.
 
-The country chooser creates a systemd timer named `chooseip-warp-socks5.timer` to check the target country daily and rotate again if needed. It stores the last successful endpoint in `/var/lib/chooseip-warp-socks5/state` and tries it first next time.
+The country chooser stores the last successful endpoint in `/var/lib/chooseip-warp-socks5/state` and tries it first next time. It does not create a daily timer unless `KEEP_DAILY_TIMER=1` is set.

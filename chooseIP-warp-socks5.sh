@@ -10,9 +10,11 @@
 #   rotation and device re-registration.
 #
 # Usage:
+#   sudo sh chooseIP-warp-socks5.sh
 #   TARGET_COUNTRY=MX sudo sh chooseIP-warp-socks5.sh
 #   TARGET_COUNTRY=MX MAX_ATTEMPTS=30 sudo sh chooseIP-warp-socks5.sh choose
 #   ENDPOINTS="162.159.192.1:2408 188.114.96.1:2408" sudo sh chooseIP-warp-socks5.sh
+#   sudo sh chooseIP-warp-socks5.sh list
 #   sudo sh chooseIP-warp-socks5.sh status
 #   sudo sh chooseIP-warp-socks5.sh uninstall-timer
 
@@ -20,9 +22,17 @@ set -eu
 
 SOCKS_HOST="127.0.0.1"
 SOCKS_PORT="${SOCKS_PORT:-40000}"
+if [ "${TARGET_COUNTRY_WAS_SET:-}" = "1" ]; then
+  TARGET_COUNTRY_WAS_SET=1
+elif [ "${TARGET_COUNTRY+x}" = "x" ]; then
+  TARGET_COUNTRY_WAS_SET=1
+else
+  TARGET_COUNTRY_WAS_SET=0
+fi
 TARGET_COUNTRY="${TARGET_COUNTRY:-MX}"
 MAX_ATTEMPTS="${MAX_ATTEMPTS:-30}"
 HARD_ROTATE_EVERY="${HARD_ROTATE_EVERY:-3}"
+KEEP_DAILY_TIMER="${KEEP_DAILY_TIMER:-0}"
 ENDPOINT_PORT="${ENDPOINT_PORT:-2408}"
 ENDPOINTS="${ENDPOINTS:-}"
 ENDPOINT_FILE="${ENDPOINT_FILE:-}"
@@ -52,7 +62,10 @@ die() {
 need_root() {
   if [ "$(id -u)" -ne 0 ]; then
     if command -v sudo >/dev/null 2>&1; then
-      exec sudo env TARGET_COUNTRY="$TARGET_COUNTRY" MAX_ATTEMPTS="$MAX_ATTEMPTS" HARD_ROTATE_EVERY="$HARD_ROTATE_EVERY" SOCKS_PORT="$SOCKS_PORT" ENDPOINT_PORT="$ENDPOINT_PORT" ENDPOINTS="$ENDPOINTS" ENDPOINT_FILE="$ENDPOINT_FILE" ENDPOINT_LIST_URL="$ENDPOINT_LIST_URL" TRY_DEFAULT_ENDPOINTS="$TRY_DEFAULT_ENDPOINTS" sh "$0" "$@"
+      if [ "$TARGET_COUNTRY_WAS_SET" = "1" ]; then
+        exec sudo env TARGET_COUNTRY="$TARGET_COUNTRY" TARGET_COUNTRY_WAS_SET=1 MAX_ATTEMPTS="$MAX_ATTEMPTS" HARD_ROTATE_EVERY="$HARD_ROTATE_EVERY" KEEP_DAILY_TIMER="$KEEP_DAILY_TIMER" SOCKS_PORT="$SOCKS_PORT" ENDPOINT_PORT="$ENDPOINT_PORT" ENDPOINTS="$ENDPOINTS" ENDPOINT_FILE="$ENDPOINT_FILE" ENDPOINT_LIST_URL="$ENDPOINT_LIST_URL" TRY_DEFAULT_ENDPOINTS="$TRY_DEFAULT_ENDPOINTS" sh "$0" "$@"
+      fi
+      exec sudo env TARGET_COUNTRY_WAS_SET=0 MAX_ATTEMPTS="$MAX_ATTEMPTS" HARD_ROTATE_EVERY="$HARD_ROTATE_EVERY" KEEP_DAILY_TIMER="$KEEP_DAILY_TIMER" SOCKS_PORT="$SOCKS_PORT" ENDPOINT_PORT="$ENDPOINT_PORT" ENDPOINTS="$ENDPOINTS" ENDPOINT_FILE="$ENDPOINT_FILE" ENDPOINT_LIST_URL="$ENDPOINT_LIST_URL" TRY_DEFAULT_ENDPOINTS="$TRY_DEFAULT_ENDPOINTS" sh "$0" "$@"
     fi
     die "Please run as root, or install sudo first."
   fi
@@ -64,6 +77,81 @@ cmd_exists() {
 
 normalize_country() {
   printf '%s' "$1" | tr '[:lower:]' '[:upper:]' | tr -cd 'A-Z'
+}
+
+region_table() {
+  cat <<'EOF'
+MX Mexico
+US United_States
+CA Canada
+BR Brazil
+AR Argentina
+CL Chile
+CO Colombia
+PE Peru
+GB United_Kingdom
+DE Germany
+FR France
+NL Netherlands
+ES Spain
+IT Italy
+SE Sweden
+TR Turkey
+JP Japan
+KR South_Korea
+SG Singapore
+HK Hong_Kong
+TW Taiwan
+AU Australia
+IN India
+EOF
+}
+
+show_region_list() {
+  N=1
+  region_table | while read -r CODE NAME; do
+    printf '%2s) %-2s %s\n' "$N" "$CODE" "$(printf '%s' "$NAME" | tr '_' ' ')"
+    N=$(( N + 1 ))
+  done
+}
+
+country_from_menu_number() {
+  WANT="$1"
+  N=1
+  region_table | while read -r CODE NAME; do
+    if [ "$N" = "$WANT" ]; then
+      printf '%s\n' "$CODE"
+      exit 0
+    fi
+    N=$(( N + 1 ))
+  done
+}
+
+select_target_country() {
+  if [ "$TARGET_COUNTRY_WAS_SET" = "1" ]; then
+    TARGET_COUNTRY="$(normalize_country "$TARGET_COUNTRY")"
+    return
+  fi
+
+  if [ -r /dev/tty ]; then
+    printf '\nAvailable target regions:\n'
+    show_region_list
+    printf '\nSelect a region number or type a two-letter country code [MX]: '
+    read -r CHOICE </dev/tty || CHOICE=""
+    CHOICE="${CHOICE:-MX}"
+    case "$CHOICE" in
+      ''|*[!0-9]*)
+        TARGET_COUNTRY="$(normalize_country "$CHOICE")"
+        ;;
+      *)
+        SELECTED="$(country_from_menu_number "$CHOICE" || true)"
+        [ -n "$SELECTED" ] || die "Invalid region selection: $CHOICE"
+        TARGET_COUNTRY="$SELECTED"
+        ;;
+    esac
+  else
+    TARGET_COUNTRY="$(normalize_country "$TARGET_COUNTRY")"
+  fi
 }
 
 detect_os() {
@@ -305,6 +393,7 @@ exit_country=$2
 endpoint=${3:-auto}
 updated_at=$(date '+%F %T')
 socks5=$SOCKS_HOST:$SOCKS_PORT
+fixed_after_success=1
 EOF
 }
 
@@ -417,13 +506,22 @@ try_endpoint_once() {
 
   if [ "$COUNTRY" = "$TARGET_COUNTRY" ]; then
     save_state "$IP" "$COUNTRY" "$ENDPOINT"
-    install_timer
-    say "Target country reached with endpoint $ENDPOINT. SOCKS5 is ready: $SOCKS_HOST:$SOCKS_PORT"
+    finalize_success
+    say "Target country reached with endpoint $ENDPOINT. SOCKS5 is fixed and ready: $SOCKS_HOST:$SOCKS_PORT"
     return 0
   fi
 
   save_state "$IP" "$COUNTRY" "$ENDPOINT"
   return 1
+}
+
+finalize_success() {
+  if [ "$KEEP_DAILY_TIMER" = "1" ]; then
+    install_timer
+  else
+    remove_timer quiet
+    say "Daily rotation/check timer is disabled. The matched WARP endpoint will stay fixed."
+  fi
 }
 
 soft_rotate() {
@@ -456,6 +554,7 @@ prepare_socks5() {
 }
 
 choose_country() {
+  select_target_country
   TARGET_COUNTRY="$(normalize_country "$TARGET_COUNTRY")"
   [ ${#TARGET_COUNTRY} -eq 2 ] || die "TARGET_COUNTRY must be a two-letter country code, for example MX."
 
@@ -494,8 +593,8 @@ choose_country() {
     if [ "$COUNTRY" = "$TARGET_COUNTRY" ]; then
       CURRENT_ENDPOINT="$(state_value endpoint 2>/dev/null || printf '%s' auto)"
       save_state "$IP" "$COUNTRY" "$CURRENT_ENDPOINT"
-      install_timer
-      say "Target country reached. SOCKS5 is ready: $SOCKS_HOST:$SOCKS_PORT"
+      finalize_success
+      say "Target country reached. SOCKS5 is fixed and ready: $SOCKS_HOST:$SOCKS_PORT"
       return 0
     fi
 
@@ -537,6 +636,7 @@ Type=oneshot
 Environment="TARGET_COUNTRY=$TARGET_COUNTRY"
 Environment="MAX_ATTEMPTS=$MAX_ATTEMPTS"
 Environment="HARD_ROTATE_EVERY=$HARD_ROTATE_EVERY"
+Environment="KEEP_DAILY_TIMER=$KEEP_DAILY_TIMER"
 Environment="SOCKS_PORT=$SOCKS_PORT"
 Environment="ENDPOINT_PORT=$ENDPOINT_PORT"
 Environment="ENDPOINTS=$ENDPOINTS"
@@ -568,7 +668,9 @@ remove_timer() {
   systemctl disable --now chooseip-warp-socks5.timer >/dev/null 2>&1 || true
   rm -f "$SYSTEMD_SERVICE" "$SYSTEMD_TIMER"
   systemctl daemon-reload || true
-  say "Daily target-country timer removed."
+  if [ "${1:-}" != "quiet" ]; then
+    say "Daily target-country timer removed."
+  fi
 }
 
 show_status() {
@@ -586,22 +688,33 @@ show_status() {
 }
 
 main() {
-  need_root "$@"
   ACTION="${1:-choose}"
+
+  case "$ACTION" in
+    list) show_region_list; exit 0 ;;
+    help|-h|--help) usage ;;
+  esac
+
+  need_root "$@"
 
   case "$ACTION" in
     choose|install) choose_country ;;
     status) show_status ;;
     uninstall-timer) remove_timer ;;
-    *)
-      cat <<EOF
+    *) usage ;;
+  esac
+}
+
+usage() {
+  cat <<EOF
 Usage:
-  TARGET_COUNTRY=MX sh $0 [choose|install|status|uninstall-timer]
+  sh $0 [choose|install|list|status|uninstall-timer]
 
 Environment:
   TARGET_COUNTRY       Two-letter target country code. Default: MX
   MAX_ATTEMPTS         Max country-selection attempts. Default: 30
   HARD_ROTATE_EVERY    Re-register every N attempts. Default: 3
+  KEEP_DAILY_TIMER     Set to 1 to keep daily country checks. Default: 0
   SOCKS_PORT           Local SOCKS5 port. Default: 40000
   ENDPOINTS            Space/comma separated endpoint list, for example "162.159.192.1:2408 188.114.96.1:2408"
   ENDPOINT_FILE        File with one endpoint per line
@@ -609,9 +722,7 @@ Environment:
   ENDPOINT_PORT        Port used when endpoint lacks a port. Default: 2408
   TRY_DEFAULT_ENDPOINTS Try built-in common WARP endpoint candidates. Default: 1
 EOF
-      exit 2
-      ;;
-  esac
+  exit 2
 }
 
 main "$@"
