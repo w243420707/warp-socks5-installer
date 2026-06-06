@@ -774,6 +774,48 @@ remove_timer() {
   fi
 }
 
+disable_proxy_and_disconnect() {
+  if cmd_exists warp-cli; then
+    warp disconnect >/dev/null 2>&1 || true
+    warp mode warp >/dev/null 2>&1 || warp set-mode warp >/dev/null 2>&1 || true
+    warp clear-custom-endpoint >/dev/null 2>&1 || warp set-custom-endpoint "" >/dev/null 2>&1 || true
+  fi
+}
+
+uninstall_local_config() {
+  remove_timer quiet
+  disable_proxy_and_disconnect
+  rm -rf "$STATE_DIR"
+  rm -f "$LOG_FILE"
+  say "Local chooseIP WARP SOCKS5 config removed. cloudflare-warp package was kept installed."
+}
+
+purge_cloudflare_warp() {
+  uninstall_local_config
+  touch "$LOG_FILE" 2>/dev/null || true
+  systemctl disable --now warp-socks5-rotate.timer >/dev/null 2>&1 || true
+  rm -f /etc/systemd/system/warp-socks5-rotate.service /etc/systemd/system/warp-socks5-rotate.timer
+  rm -rf /var/lib/warp-socks5
+  rm -f /var/log/warp-socks5.log
+  detect_os
+  if is_debian_like && cmd_exists apt-get; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get remove -y cloudflare-warp >>"$LOG_FILE" 2>&1 || true
+    rm -f /etc/apt/sources.list.d/cloudflare-client.list
+    rm -f /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
+    apt-get update >>"$LOG_FILE" 2>&1 || true
+  elif is_rpm_like; then
+    if cmd_exists dnf; then
+      dnf remove -y cloudflare-warp >>"$LOG_FILE" 2>&1 || true
+    elif cmd_exists yum; then
+      yum remove -y cloudflare-warp >>"$LOG_FILE" 2>&1 || true
+    fi
+    rm -f /etc/yum.repos.d/cloudflare-warp.repo
+  fi
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  say "cloudflare-warp package and chooseIP script config were removed."
+}
+
 show_status() {
   prepare_socks5
   IP="$(warp_ip 2>/dev/null || true)"
@@ -805,6 +847,8 @@ interactive_menu() {
     printf '4) Show current status\n' >/dev/tty
     printf '5) Show built-in region list\n' >/dev/tty
     printf '6) Remove daily timer\n' >/dev/tty
+    printf '7) Uninstall local chooseIP config only\n' >/dev/tty
+    printf '8) Purge cloudflare-warp package and chooseIP config\n' >/dev/tty
     printf '0) Exit\n\n' >/dev/tty
 
     CHOICE="$(read_tty 'Select: ' '')"
@@ -829,6 +873,18 @@ interactive_menu() {
         ;;
       6)
         remove_timer
+        ;;
+      7)
+        ANSWER="$(read_tty 'Remove timer, scan/state/log, and disconnect WARP but keep cloudflare-warp installed? [y/N]: ' 'n')"
+        case "$ANSWER" in
+          y|Y|yes|YES) uninstall_local_config ;;
+        esac
+        ;;
+      8)
+        ANSWER="$(read_tty 'Purge cloudflare-warp package, repo, timer, scan/state/log, and config? [y/N]: ' 'n')"
+        case "$ANSWER" in
+          y|Y|yes|YES) purge_cloudflare_warp ;;
+        esac
         ;;
       0)
         exit 0
@@ -857,6 +913,8 @@ main() {
     scan) scan_regions ;;
     status) show_status ;;
     uninstall-timer) remove_timer ;;
+    uninstall) uninstall_local_config ;;
+    purge) purge_cloudflare_warp ;;
     *) usage ;;
   esac
 }
@@ -864,7 +922,7 @@ main() {
 usage() {
   cat <<EOF
 Usage:
-  sh $0 [menu|choose|install|scan|list|list-available|status|uninstall-timer]
+  sh $0 [menu|choose|install|scan|list|list-available|status|uninstall-timer|uninstall|purge]
 
 Environment:
   TARGET_COUNTRY       Two-letter target country code. Default: MX
@@ -878,6 +936,10 @@ Environment:
   ENDPOINT_LIST_URL    URL returning one endpoint per line
   ENDPOINT_PORT        Port used when endpoint lacks a port. Default: 2408
   TRY_DEFAULT_ENDPOINTS Try built-in common WARP endpoint candidates. Default: 1
+
+Uninstall modes:
+  uninstall  Remove this script's timer/scan/state/log and disconnect WARP. Keep cloudflare-warp installed.
+  purge      Remove cloudflare-warp package/repo plus this script's timer/scan/state/log.
 EOF
   exit 2
 }

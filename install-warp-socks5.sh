@@ -5,9 +5,12 @@
 # systemd timer to rotate the WARP exit IP and restart the proxy.
 #
 # Usage:
-#   sh install-warp-socks5.sh          # install or repair
+#   sh install-warp-socks5.sh          # interactive menu
+#   sh install-warp-socks5.sh install  # install or repair
 #   sh install-warp-socks5.sh status   # show status and current WARP IP
 #   sh install-warp-socks5.sh rotate   # rotate WARP IP now
+#   sh install-warp-socks5.sh uninstall
+#   sh install-warp-socks5.sh purge
 #   sh install-warp-socks5.sh uninstall-timer
 
 set -eu
@@ -313,7 +316,50 @@ remove_timer() {
   systemctl disable --now warp-socks5-rotate.timer >/dev/null 2>&1 || true
   rm -f "$SYSTEMD_SERVICE" "$SYSTEMD_TIMER"
   systemctl daemon-reload || true
-  say "Daily IP rotation timer removed."
+  if [ "${1:-}" != "quiet" ]; then
+    say "Daily IP rotation timer removed."
+  fi
+}
+
+disable_proxy_and_disconnect() {
+  if cmd_exists warp-cli; then
+    warp disconnect >/dev/null 2>&1 || true
+    warp mode warp >/dev/null 2>&1 || warp set-mode warp >/dev/null 2>&1 || true
+  fi
+}
+
+uninstall_local_config() {
+  remove_timer quiet
+  disable_proxy_and_disconnect
+  rm -rf "$STATE_DIR"
+  rm -f "$LOG_FILE"
+  say "Local WARP SOCKS5 config removed. cloudflare-warp package was kept installed."
+}
+
+purge_cloudflare_warp() {
+  uninstall_local_config
+  touch "$LOG_FILE" 2>/dev/null || true
+  systemctl disable --now chooseip-warp-socks5.timer >/dev/null 2>&1 || true
+  rm -f /etc/systemd/system/chooseip-warp-socks5.service /etc/systemd/system/chooseip-warp-socks5.timer
+  rm -rf /var/lib/chooseip-warp-socks5
+  rm -f /var/log/chooseip-warp-socks5.log
+  detect_os
+  if is_debian_like && cmd_exists apt-get; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get remove -y cloudflare-warp >>"$LOG_FILE" 2>&1 || true
+    rm -f /etc/apt/sources.list.d/cloudflare-client.list
+    rm -f /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
+    apt-get update >>"$LOG_FILE" 2>&1 || true
+  elif is_rpm_like; then
+    if cmd_exists dnf; then
+      dnf remove -y cloudflare-warp >>"$LOG_FILE" 2>&1 || true
+    elif cmd_exists yum; then
+      yum remove -y cloudflare-warp >>"$LOG_FILE" 2>&1 || true
+    fi
+    rm -f /etc/yum.repos.d/cloudflare-warp.repo
+  fi
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  say "cloudflare-warp package and this script config were removed."
 }
 
 repair_or_install() {
@@ -409,25 +455,95 @@ show_status() {
   fi
 }
 
+read_tty() {
+  PROMPT="$1"
+  DEFAULT="${2:-}"
+  if [ -r /dev/tty ]; then
+    printf '%s' "$PROMPT" >/dev/tty
+    read -r ANSWER </dev/tty || ANSWER=""
+    printf '%s\n' "${ANSWER:-$DEFAULT}"
+  else
+    printf '%s\n' "$DEFAULT"
+  fi
+}
+
+confirm_tty() {
+  PROMPT="$1"
+  ANSWER="$(read_tty "$PROMPT [y/N]: " "n")"
+  case "$ANSWER" in
+    y|Y|yes|YES) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+interactive_menu() {
+  while :; do
+    printf '\nCloudflare WARP SOCKS5\n' >/dev/tty
+    printf '1) Install or repair SOCKS5 127.0.0.1:%s\n' "$SOCKS_PORT" >/dev/tty
+    printf '2) Show status\n' >/dev/tty
+    printf '3) Rotate WARP IP now\n' >/dev/tty
+    printf '4) Enable daily IP rotation timer\n' >/dev/tty
+    printf '5) Disable daily IP rotation timer\n' >/dev/tty
+    printf '6) Uninstall local SOCKS5 config only\n' >/dev/tty
+    printf '7) Purge cloudflare-warp package and config\n' >/dev/tty
+    printf '0) Exit\n\n' >/dev/tty
+
+    CHOICE="$(read_tty 'Select: ' '')"
+    case "$CHOICE" in
+      1) repair_or_install ;;
+      2) show_status ;;
+      3) rotate_ip ;;
+      4) install_timer ;;
+      5) remove_timer ;;
+      6)
+        if confirm_tty "Remove timer, state, log, and disconnect WARP but keep cloudflare-warp installed?"; then
+          uninstall_local_config
+        fi
+        ;;
+      7)
+        if confirm_tty "Purge cloudflare-warp package, repo, timer, state, and config?"; then
+          purge_cloudflare_warp
+        fi
+        ;;
+      0) exit 0 ;;
+      *) printf 'Invalid selection.\n' >/dev/tty ;;
+    esac
+  done
+}
+
+usage() {
+  cat <<EOF
+Usage:
+  sh $0 [menu|install|repair|status|rotate|enable-timer|uninstall-timer|uninstall|purge]
+
+Default action: menu
+SOCKS5: $SOCKS_HOST:$SOCKS_PORT
+
+Uninstall modes:
+  uninstall  Remove this script's timer/state/log and disconnect WARP. Keep cloudflare-warp installed.
+  purge      Remove cloudflare-warp package/repo plus this script's timer/state/log.
+EOF
+  exit 2
+}
+
 main() {
+  ACTION="${1:-menu}"
+  case "$ACTION" in
+    help|-h|--help) usage ;;
+  esac
+
   need_root "$@"
-  ACTION="${1:-install}"
 
   case "$ACTION" in
+    menu|interactive) interactive_menu ;;
     install|repair) repair_or_install ;;
     rotate) rotate_ip ;;
     status) show_status ;;
+    enable-timer) install_timer ;;
     uninstall-timer) remove_timer ;;
-    *)
-      cat <<EOF
-Usage:
-  sh $0 [install|repair|status|rotate|uninstall-timer]
-
-Default action: install
-SOCKS5: $SOCKS_HOST:$SOCKS_PORT
-EOF
-      exit 2
-      ;;
+    uninstall) uninstall_local_config ;;
+    purge) purge_cloudflare_warp ;;
+    *) usage ;;
   esac
 }
 

@@ -14,6 +14,8 @@ Default SOCKS5 endpoint:
 curl -fsSL https://raw.githubusercontent.com/w243420707/warp-socks5-installer/main/install-warp-socks5.sh | sudo sh
 ```
 
+The installer opens an interactive menu by default. It can install/repair, show status, rotate the WARP IP, enable/disable the daily timer, uninstall local config, or purge `cloudflare-warp`.
+
 ## Try To Choose WARP Exit Country
 
 Cloudflare WARP does not officially support selecting an exit country. This script shows a region list, lets you choose a target, tries WARP endpoint candidates first, and stops when the detected exit IP country matches the target. After a successful match, it keeps that endpoint fixed and does not rotate daily by default.
@@ -50,6 +52,8 @@ sudo env TARGET_COUNTRY=MX ENDPOINT_FILE=/root/mx-endpoints.txt sh chooseIP-warp
 sudo sh install-warp-socks5.sh status
 sudo sh install-warp-socks5.sh rotate
 sudo sh install-warp-socks5.sh uninstall-timer
+sudo sh install-warp-socks5.sh uninstall
+sudo sh install-warp-socks5.sh purge
 ```
 
 For the country chooser:
@@ -61,6 +65,8 @@ sudo sh chooseIP-warp-socks5.sh list
 sudo env TARGET_COUNTRY=MX sh chooseIP-warp-socks5.sh status
 sudo env TARGET_COUNTRY=MX MAX_ATTEMPTS=30 sh chooseIP-warp-socks5.sh choose
 sudo sh chooseIP-warp-socks5.sh uninstall-timer
+sudo sh chooseIP-warp-socks5.sh uninstall
+sudo sh chooseIP-warp-socks5.sh purge
 ```
 
 The installer creates a systemd timer named `warp-socks5-rotate.timer` to rotate the WARP exit IP daily and restart the SOCKS5 service.
