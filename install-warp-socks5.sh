@@ -22,6 +22,7 @@ STATE_IP_FILE="$STATE_DIR/current_ip"
 LOG_FILE="/var/log/warp-socks5.log"
 SYSTEMD_SERVICE="/etc/systemd/system/warp-socks5-rotate.service"
 SYSTEMD_TIMER="/etc/systemd/system/warp-socks5-rotate.timer"
+SCRIPT_URL="${SCRIPT_URL:-https://raw.githubusercontent.com/w243420707/warp-socks5-installer/main/install-warp-socks5.sh}"
 SELF_PATH=""
 
 log() {
@@ -281,7 +282,11 @@ save_current_ip() {
 
 install_timer() {
   SELF_PATH="$(readlink -f "$0" 2>/dev/null || realpath "$0" 2>/dev/null || printf '%s\n' "$0")"
-  [ -r "$SELF_PATH" ] || die "Cannot locate this script path: $SELF_PATH"
+  if [ -r "$SELF_PATH" ] && grep -q 'warp-socks5-rotate.timer' "$SELF_PATH" 2>/dev/null; then
+    TIMER_EXEC="/bin/sh $SELF_PATH rotate"
+  else
+    TIMER_EXEC="/bin/sh -c 'curl -fsSL \"$SCRIPT_URL\" | /bin/sh -s rotate'"
+  fi
 
   cat >"$SYSTEMD_SERVICE" <<EOF
 [Unit]
@@ -291,7 +296,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/bin/sh $SELF_PATH rotate
+ExecStart=$TIMER_EXEC
 EOF
 
   cat >"$SYSTEMD_TIMER" <<'EOF'
