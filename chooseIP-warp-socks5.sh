@@ -16,7 +16,6 @@
 #   ENDPOINTS="162.159.192.1:2408 188.114.96.1:2408" sudo sh chooseIP-warp-socks5.sh
 #   sudo sh chooseIP-warp-socks5.sh list
 #   sudo sh chooseIP-warp-socks5.sh status
-#   sudo sh chooseIP-warp-socks5.sh uninstall-timer
 
 set -eu
 
@@ -33,7 +32,6 @@ TARGET_COUNTRY="${TARGET_COUNTRY:-MX}"
 MAX_ATTEMPTS="${MAX_ATTEMPTS:-30}"
 SCAN_LIMIT="${SCAN_LIMIT:-100}"
 HARD_ROTATE_EVERY="${HARD_ROTATE_EVERY:-3}"
-KEEP_DAILY_TIMER="${KEEP_DAILY_TIMER:-0}"
 ENDPOINT_PORT="${ENDPOINT_PORT:-2408}"
 ENDPOINTS="${ENDPOINTS:-}"
 ENDPOINT_FILE="${ENDPOINT_FILE:-}"
@@ -66,9 +64,9 @@ need_root() {
   if [ "$(id -u)" -ne 0 ]; then
     if command -v sudo >/dev/null 2>&1; then
       if [ "$TARGET_COUNTRY_WAS_SET" = "1" ]; then
-        exec sudo env TARGET_COUNTRY="$TARGET_COUNTRY" TARGET_COUNTRY_WAS_SET=1 MAX_ATTEMPTS="$MAX_ATTEMPTS" HARD_ROTATE_EVERY="$HARD_ROTATE_EVERY" KEEP_DAILY_TIMER="$KEEP_DAILY_TIMER" SOCKS_PORT="$SOCKS_PORT" ENDPOINT_PORT="$ENDPOINT_PORT" ENDPOINTS="$ENDPOINTS" ENDPOINT_FILE="$ENDPOINT_FILE" ENDPOINT_LIST_URL="$ENDPOINT_LIST_URL" TRY_DEFAULT_ENDPOINTS="$TRY_DEFAULT_ENDPOINTS" sh "$0" "$@"
+        exec sudo env TARGET_COUNTRY="$TARGET_COUNTRY" TARGET_COUNTRY_WAS_SET=1 MAX_ATTEMPTS="$MAX_ATTEMPTS" HARD_ROTATE_EVERY="$HARD_ROTATE_EVERY" SOCKS_PORT="$SOCKS_PORT" ENDPOINT_PORT="$ENDPOINT_PORT" ENDPOINTS="$ENDPOINTS" ENDPOINT_FILE="$ENDPOINT_FILE" ENDPOINT_LIST_URL="$ENDPOINT_LIST_URL" TRY_DEFAULT_ENDPOINTS="$TRY_DEFAULT_ENDPOINTS" sh "$0" "$@"
       fi
-      exec sudo env TARGET_COUNTRY_WAS_SET=0 MAX_ATTEMPTS="$MAX_ATTEMPTS" HARD_ROTATE_EVERY="$HARD_ROTATE_EVERY" KEEP_DAILY_TIMER="$KEEP_DAILY_TIMER" SOCKS_PORT="$SOCKS_PORT" ENDPOINT_PORT="$ENDPOINT_PORT" ENDPOINTS="$ENDPOINTS" ENDPOINT_FILE="$ENDPOINT_FILE" ENDPOINT_LIST_URL="$ENDPOINT_LIST_URL" TRY_DEFAULT_ENDPOINTS="$TRY_DEFAULT_ENDPOINTS" sh "$0" "$@"
+      exec sudo env TARGET_COUNTRY_WAS_SET=0 MAX_ATTEMPTS="$MAX_ATTEMPTS" HARD_ROTATE_EVERY="$HARD_ROTATE_EVERY" SOCKS_PORT="$SOCKS_PORT" ENDPOINT_PORT="$ENDPOINT_PORT" ENDPOINTS="$ENDPOINTS" ENDPOINT_FILE="$ENDPOINT_FILE" ENDPOINT_LIST_URL="$ENDPOINT_LIST_URL" TRY_DEFAULT_ENDPOINTS="$TRY_DEFAULT_ENDPOINTS" sh "$0" "$@"
     fi
     die "Please run as root, or install sudo first."
   fi
@@ -617,12 +615,8 @@ scan_regions() {
 }
 
 finalize_success() {
-  if [ "$KEEP_DAILY_TIMER" = "1" ]; then
-    install_timer
-  else
-    remove_timer quiet
-    say "Daily rotation/check timer is disabled. The matched WARP endpoint will stay fixed."
-  fi
+  cleanup_legacy_timer quiet
+  say "已固定当前可用 WARP endpoint，不会创建每日定时器。"
 }
 
 soft_rotate() {
@@ -722,55 +716,12 @@ choose_country() {
   done
 }
 
-install_timer() {
-  SELF_PATH="$(readlink -f "$0" 2>/dev/null || realpath "$0" 2>/dev/null || printf '%s\n' "$0")"
-  [ -r "$SELF_PATH" ] || return 0
-
-  cat >"$SYSTEMD_SERVICE" <<EOF
-[Unit]
-Description=Keep Cloudflare WARP SOCKS5 on target country
-After=network-online.target warp-svc.service
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-Environment="TARGET_COUNTRY=$TARGET_COUNTRY"
-Environment="MAX_ATTEMPTS=$MAX_ATTEMPTS"
-Environment="HARD_ROTATE_EVERY=$HARD_ROTATE_EVERY"
-Environment="KEEP_DAILY_TIMER=$KEEP_DAILY_TIMER"
-Environment="SOCKS_PORT=$SOCKS_PORT"
-Environment="ENDPOINT_PORT=$ENDPOINT_PORT"
-Environment="ENDPOINTS=$ENDPOINTS"
-Environment="ENDPOINT_FILE=$ENDPOINT_FILE"
-Environment="ENDPOINT_LIST_URL=$ENDPOINT_LIST_URL"
-Environment="TRY_DEFAULT_ENDPOINTS=$TRY_DEFAULT_ENDPOINTS"
-ExecStart=/bin/sh $SELF_PATH choose
-EOF
-
-  cat >"$SYSTEMD_TIMER" <<'EOF'
-[Unit]
-Description=Daily Cloudflare WARP target-country check
-
-[Timer]
-OnCalendar=*-*-* 04:40:00
-RandomizedDelaySec=30m
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-EOF
-
-  systemctl daemon-reload
-  systemctl enable --now chooseip-warp-socks5.timer >/dev/null
-  say "Daily target-country timer created: chooseip-warp-socks5.timer"
-}
-
-remove_timer() {
+cleanup_legacy_timer() {
   systemctl disable --now chooseip-warp-socks5.timer >/dev/null 2>&1 || true
   rm -f "$SYSTEMD_SERVICE" "$SYSTEMD_TIMER"
   systemctl daemon-reload || true
   if [ "${1:-}" != "quiet" ]; then
-    say "Daily target-country timer removed."
+    say "已清理旧版本遗留的 chooseIP 每日定时器。"
   fi
 }
 
@@ -783,7 +734,7 @@ disable_proxy_and_disconnect() {
 }
 
 uninstall_local_config() {
-  remove_timer quiet
+  cleanup_legacy_timer quiet
   disable_proxy_and_disconnect
   rm -rf "$STATE_DIR"
   rm -f "$LOG_FILE"
@@ -846,7 +797,7 @@ interactive_menu() {
     printf '3) 选择地区并固定 WARP SOCKS5\n' >/dev/tty
     printf '4) 查看当前状态\n' >/dev/tty
     printf '5) 查看内置地区列表\n' >/dev/tty
-    printf '6) 移除每日定时器\n' >/dev/tty
+    printf '6) 清理旧版本遗留定时器\n' >/dev/tty
     printf '7) 仅卸载本地 chooseIP 配置\n' >/dev/tty
     printf '8) 彻底卸载 cloudflare-warp 和 chooseIP 配置\n' >/dev/tty
     printf '0) 退出\n\n' >/dev/tty
@@ -872,16 +823,16 @@ interactive_menu() {
         show_region_list
         ;;
       6)
-        remove_timer
+        cleanup_legacy_timer
         ;;
       7)
-        ANSWER="$(read_tty '确认移除定时器、扫描结果、状态、日志并断开 WARP，但保留 cloudflare-warp 软件包吗？[y/N/是]: ' 'n')"
+        ANSWER="$(read_tty '确认移除扫描结果、状态、日志并断开 WARP，但保留 cloudflare-warp 软件包吗？[y/N/是]: ' 'n')"
         case "$ANSWER" in
           y|Y|yes|YES|是|确认) uninstall_local_config ;;
         esac
         ;;
       8)
-        ANSWER="$(read_tty '确认彻底卸载 cloudflare-warp 软件包、软件源、定时器、扫描结果、状态和配置吗？[y/N/是]: ' 'n')"
+        ANSWER="$(read_tty '确认彻底卸载 cloudflare-warp 软件包、软件源、扫描结果、状态和配置吗？[y/N/是]: ' 'n')"
         case "$ANSWER" in
           y|Y|yes|YES|是|确认) purge_cloudflare_warp ;;
         esac
@@ -912,7 +863,7 @@ main() {
     choose|install) choose_country ;;
     scan) scan_regions ;;
     status) show_status ;;
-    uninstall-timer) remove_timer ;;
+    cleanup-timer) cleanup_legacy_timer ;;
     uninstall) uninstall_local_config ;;
     purge) purge_cloudflare_warp ;;
     *) usage ;;
@@ -922,14 +873,13 @@ main() {
 usage() {
   cat <<EOF
 用法:
-  sh $0 [menu|choose|install|scan|list|list-available|status|uninstall-timer|uninstall|purge]
+  sh $0 [menu|choose|install|scan|list|list-available|status|cleanup-timer|uninstall|purge]
 
 环境变量:
   TARGET_COUNTRY        两位目标国家/地区代码，默认 MX。
   MAX_ATTEMPTS          选区最大尝试次数，默认 30。
   SCAN_LIMIT            扫描 endpoint 的最大数量，默认 100。
   HARD_ROTATE_EVERY     每尝试 N 次重新注册一次设备，默认 3。
-  KEEP_DAILY_TIMER      设为 1 时保留每日地区检查，默认 0。
   SOCKS_PORT            本地 SOCKS5 端口，默认 40000。
   ENDPOINTS             endpoint 列表，支持空格/逗号分隔，例如 "162.159.192.1:2408 188.114.96.1:2408"。
   ENDPOINT_FILE         endpoint 文件路径，每行一个 endpoint。
@@ -938,8 +888,9 @@ usage() {
   TRY_DEFAULT_ENDPOINTS 是否尝试内置常见 WARP endpoint，默认 1。
 
 卸载模式:
-  uninstall  移除本脚本创建的定时器、扫描结果、状态、日志并断开 WARP，保留 cloudflare-warp 软件包。
-  purge      移除 cloudflare-warp 软件包/软件源，以及本脚本创建的定时器、扫描结果、状态、日志。
+  cleanup-timer 清理旧版本可能遗留的 chooseIP 每日定时器。
+  uninstall     移除本脚本创建的扫描结果、状态、日志并断开 WARP，保留 cloudflare-warp 软件包。
+  purge         移除 cloudflare-warp 软件包/软件源，以及本脚本创建的扫描结果、状态、日志。
 EOF
   exit 2
 }

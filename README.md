@@ -64,11 +64,11 @@ sudo sh chooseIP-warp-socks5.sh list-available
 sudo sh chooseIP-warp-socks5.sh list
 sudo env TARGET_COUNTRY=MX sh chooseIP-warp-socks5.sh status
 sudo env TARGET_COUNTRY=MX MAX_ATTEMPTS=30 sh chooseIP-warp-socks5.sh choose
-sudo sh chooseIP-warp-socks5.sh uninstall-timer
+sudo sh chooseIP-warp-socks5.sh cleanup-timer
 sudo sh chooseIP-warp-socks5.sh uninstall
 sudo sh chooseIP-warp-socks5.sh purge
 ```
 
 安装脚本会创建 `warp-socks5-rotate.timer`，用于每天更换 WARP 出口 IP 并重启 SOCKS5。
 
-选区脚本会把最后成功的 endpoint 保存到 `/var/lib/chooseip-warp-socks5/state`，下次优先尝试。除非设置 `KEEP_DAILY_TIMER=1`，否则不会创建每日定时器。
+选区脚本会把最后成功的 endpoint 保存到 `/var/lib/chooseip-warp-socks5/state`，下次优先尝试。它不会创建每日定时器；找到可用地区后就固定使用。
