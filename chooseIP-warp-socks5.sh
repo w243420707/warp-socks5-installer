@@ -38,6 +38,7 @@ ENDPOINT_PORT="${ENDPOINT_PORT:-2408}"
 ENDPOINTS="${ENDPOINTS:-}"
 ENDPOINT_FILE="${ENDPOINT_FILE:-}"
 ENDPOINT_LIST_URL="${ENDPOINT_LIST_URL:-}"
+ONLINE_ENDPOINT_SOURCES="${ONLINE_ENDPOINT_SOURCES:-https://gitlab.com/Misaka-blog/warp-script/-/raw/main/files/warp-yxip/ips-v4.txt}"
 TRY_DEFAULT_ENDPOINTS="${TRY_DEFAULT_ENDPOINTS:-1}"
 STATE_DIR="/var/lib/chooseip-warp-socks5"
 STATE_FILE="$STATE_DIR/state"
@@ -66,9 +67,9 @@ need_root() {
   if [ "$(id -u)" -ne 0 ]; then
     if command -v sudo >/dev/null 2>&1; then
       if [ "$TARGET_COUNTRY_WAS_SET" = "1" ]; then
-        exec sudo env TARGET_COUNTRY="$TARGET_COUNTRY" TARGET_COUNTRY_WAS_SET=1 MAX_ATTEMPTS="$MAX_ATTEMPTS" SCAN_LIMIT="$SCAN_LIMIT" SCAN_FAST="$SCAN_FAST" SCAN_WAIT_SECONDS="$SCAN_WAIT_SECONDS" HARD_ROTATE_EVERY="$HARD_ROTATE_EVERY" SOCKS_PORT="$SOCKS_PORT" ENDPOINT_PORT="$ENDPOINT_PORT" ENDPOINTS="$ENDPOINTS" ENDPOINT_FILE="$ENDPOINT_FILE" ENDPOINT_LIST_URL="$ENDPOINT_LIST_URL" TRY_DEFAULT_ENDPOINTS="$TRY_DEFAULT_ENDPOINTS" sh "$0" "$@"
+        exec sudo env TARGET_COUNTRY="$TARGET_COUNTRY" TARGET_COUNTRY_WAS_SET=1 MAX_ATTEMPTS="$MAX_ATTEMPTS" SCAN_LIMIT="$SCAN_LIMIT" SCAN_FAST="$SCAN_FAST" SCAN_WAIT_SECONDS="$SCAN_WAIT_SECONDS" HARD_ROTATE_EVERY="$HARD_ROTATE_EVERY" SOCKS_PORT="$SOCKS_PORT" ENDPOINT_PORT="$ENDPOINT_PORT" ENDPOINTS="$ENDPOINTS" ENDPOINT_FILE="$ENDPOINT_FILE" ENDPOINT_LIST_URL="$ENDPOINT_LIST_URL" ONLINE_ENDPOINT_SOURCES="$ONLINE_ENDPOINT_SOURCES" TRY_DEFAULT_ENDPOINTS="$TRY_DEFAULT_ENDPOINTS" sh "$0" "$@"
       fi
-      exec sudo env TARGET_COUNTRY_WAS_SET=0 MAX_ATTEMPTS="$MAX_ATTEMPTS" SCAN_LIMIT="$SCAN_LIMIT" SCAN_FAST="$SCAN_FAST" SCAN_WAIT_SECONDS="$SCAN_WAIT_SECONDS" HARD_ROTATE_EVERY="$HARD_ROTATE_EVERY" SOCKS_PORT="$SOCKS_PORT" ENDPOINT_PORT="$ENDPOINT_PORT" ENDPOINTS="$ENDPOINTS" ENDPOINT_FILE="$ENDPOINT_FILE" ENDPOINT_LIST_URL="$ENDPOINT_LIST_URL" TRY_DEFAULT_ENDPOINTS="$TRY_DEFAULT_ENDPOINTS" sh "$0" "$@"
+      exec sudo env TARGET_COUNTRY_WAS_SET=0 MAX_ATTEMPTS="$MAX_ATTEMPTS" SCAN_LIMIT="$SCAN_LIMIT" SCAN_FAST="$SCAN_FAST" SCAN_WAIT_SECONDS="$SCAN_WAIT_SECONDS" HARD_ROTATE_EVERY="$HARD_ROTATE_EVERY" SOCKS_PORT="$SOCKS_PORT" ENDPOINT_PORT="$ENDPOINT_PORT" ENDPOINTS="$ENDPOINTS" ENDPOINT_FILE="$ENDPOINT_FILE" ENDPOINT_LIST_URL="$ENDPOINT_LIST_URL" ONLINE_ENDPOINT_SOURCES="$ONLINE_ENDPOINT_SOURCES" TRY_DEFAULT_ENDPOINTS="$TRY_DEFAULT_ENDPOINTS" sh "$0" "$@"
     fi
     die "Please run as root, or install sudo first."
   fi
@@ -455,6 +456,7 @@ normalize_endpoint() {
   case "$EP" in
     \#*) return 1 ;;
   esac
+  printf '%s\n' "$EP" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(:[0-9]+)?$' || return 1
   case "$EP" in
     *:*) printf '%s\n' "$EP" ;;
     *) printf '%s:%s\n' "$EP" "$ENDPOINT_PORT" ;;
@@ -463,11 +465,25 @@ normalize_endpoint() {
 
 write_default_endpoints() {
   OUT="$1"
-  for BASE in 162.159.192 162.159.193 162.159.195 188.114.96 188.114.97; do
-    for N in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+  for BASE in 162.159.192 162.159.193 162.159.195 162.159.197 188.114.96 188.114.97 188.114.98 188.114.99; do
+    N=1
+    while [ "$N" -le 254 ]; do
       printf '%s.%s:%s\n' "$BASE" "$N" "$ENDPOINT_PORT" >>"$OUT"
+      N=$(( N + 1 ))
     done
   done
+}
+
+append_endpoint_url() {
+  URL="$1"
+  [ -n "$URL" ] || return 0
+  say "正在拉取在线 endpoint 列表: $URL"
+  curl --silent --show-error --max-time 25 "$URL" 2>>"$LOG_FILE" \
+    | sed 's/[",]//g' \
+    | tr ' ' '\n' \
+    | while IFS= read -r EP; do
+        normalize_endpoint "$EP" >>"$TMP" 2>/dev/null || true
+      done
 }
 
 build_endpoint_list() {
@@ -492,11 +508,16 @@ build_endpoint_list() {
     done <"$ENDPOINT_FILE"
   fi
 
+  if [ -n "$ONLINE_ENDPOINT_SOURCES" ]; then
+    for URL in $(printf '%s' "$ONLINE_ENDPOINT_SOURCES" | tr ',;' '  '); do
+      append_endpoint_url "$URL"
+    done
+  fi
+
   if [ -n "$ENDPOINT_LIST_URL" ]; then
-    curl --silent --show-error --max-time 20 "$ENDPOINT_LIST_URL" 2>>"$LOG_FILE" \
-      | while IFS= read -r EP; do
-          normalize_endpoint "$EP" >>"$TMP" 2>/dev/null || true
-        done
+    for URL in $(printf '%s' "$ENDPOINT_LIST_URL" | tr ',;' '  '); do
+      append_endpoint_url "$URL"
+    done
   fi
 
   if [ "$TRY_DEFAULT_ENDPOINTS" = "1" ]; then
@@ -909,6 +930,7 @@ usage() {
   ENDPOINTS             endpoint 列表，支持空格/逗号分隔，例如 "162.159.192.1:2408 188.114.96.1:2408"。
   ENDPOINT_FILE         endpoint 文件路径，每行一个 endpoint。
   ENDPOINT_LIST_URL     endpoint 列表 URL，每行一个 endpoint。
+  ONLINE_ENDPOINT_SOURCES 默认在线 endpoint 源，支持多个 URL，用空格/逗号分隔。
   ENDPOINT_PORT         endpoint 未写端口时使用的端口，默认 2408。
   TRY_DEFAULT_ENDPOINTS 是否尝试内置常见 WARP endpoint，默认 1。
 

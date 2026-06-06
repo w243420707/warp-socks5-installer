@@ -28,6 +28,7 @@ curl -fsSL https://raw.githubusercontent.com/w243420707/warp-socks5-installer/ma
 
 菜单包含扫描 endpoint、查看可用地区、选择地区并固定、查看状态、清理旧定时器和卸载。
 扫描默认使用快速模式：切换 endpoint 后只断开重连，不每次重启 `warp-svc`；失败时才重启兜底。
+脚本会默认拉取一个社区维护的 WARP endpoint 列表，并补充 Cloudflare 官方/常见 WARP ingress 网段候选。Cloudflare 不公开 WARP 出口 IP 段，所以仍需通过实际连接检测出口国家。
 
 直接选择墨西哥:
 
@@ -62,6 +63,7 @@ sudo sh install-warp-socks5.sh purge
 ```sh
 sudo sh chooseIP-warp-socks5.sh scan
 sudo env SCAN_LIMIT=100 SCAN_WAIT_SECONDS=8 sh chooseIP-warp-socks5.sh scan
+sudo env ONLINE_ENDPOINT_SOURCES="https://gitlab.com/Misaka-blog/warp-script/-/raw/main/files/warp-yxip/ips-v4.txt" sh chooseIP-warp-socks5.sh scan
 sudo sh chooseIP-warp-socks5.sh list-available
 sudo sh chooseIP-warp-socks5.sh list
 sudo env TARGET_COUNTRY=MX sh chooseIP-warp-socks5.sh status
