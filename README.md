@@ -29,10 +29,18 @@ sudo sh install-warp-socks5.sh purge
 
 换 IP 默认最多尝试 3 次。只有检测到新出口 IP 和旧出口 IP 不同时才算成功；如果 Cloudflare 仍分配同一个出口 IP，脚本会明确报错，不再假报成功。
 
+换 IP 时会默认尝试随机切换 WARP 入口 endpoint，再重连/重新注册 WARP，以尽量触发 Cloudflare 重新分配出口。
+
 可以增加尝试次数：
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/w243420707/warp-socks5-installer/main/install-warp-socks5.sh | sudo env ROTATE_ATTEMPTS=5 sh -s rotate
+```
+
+如果你的 `warp-cli` 不支持自定义 endpoint，脚本会自动跳过入口切换。也可以手动关闭：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/w243420707/warp-socks5-installer/main/install-warp-socks5.sh | sudo env FORCE_ENDPOINT_ROTATE=0 ROTATE_ATTEMPTS=5 sh -s rotate
 ```
 
 卸载说明：
