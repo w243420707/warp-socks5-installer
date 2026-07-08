@@ -18,15 +18,12 @@ set -eu
 SOCKS_HOST="127.0.0.1"
 SOCKS_PORT="${SOCKS_PORT:-40000}"
 ROTATE_ATTEMPTS="${ROTATE_ATTEMPTS:-3}"
-FORCE_ENDPOINT_ROTATE="${FORCE_ENDPOINT_ROTATE:-1}"
-ENDPOINT_PORT="${ENDPOINT_PORT:-2408}"
-ENDPOINT_BASES="${ENDPOINT_BASES:-162.159.192 162.159.193 162.159.195 162.159.197 188.114.96 188.114.97 188.114.98 188.114.99}"
 STATE_DIR="/var/lib/warp-socks5"
 STATE_IP_FILE="$STATE_DIR/current_ip"
 LOG_FILE="/var/log/warp-socks5.log"
 SYSTEMD_SERVICE="/etc/systemd/system/warp-socks5-rotate.service"
 SYSTEMD_TIMER="/etc/systemd/system/warp-socks5-rotate.timer"
-SCRIPT_URL="${SCRIPT_URL:-https://raw.githubusercontent.com/w243420707/warp-socks5-installer/main/install-warp-socks5.sh?v=20260708-2}"
+SCRIPT_URL="${SCRIPT_URL:-https://raw.githubusercontent.com/w243420707/warp-socks5-installer/main/install-warp-socks5.sh?v=20260708-1}"
 SELF_PATH=""
 
 log() {
@@ -46,7 +43,7 @@ die() {
 need_root() {
   if [ "$(id -u)" -ne 0 ]; then
     if command -v sudo >/dev/null 2>&1; then
-      exec sudo env ROTATE_ATTEMPTS="$ROTATE_ATTEMPTS" FORCE_ENDPOINT_ROTATE="$FORCE_ENDPOINT_ROTATE" ENDPOINT_PORT="$ENDPOINT_PORT" ENDPOINT_BASES="$ENDPOINT_BASES" SOCKS_PORT="$SOCKS_PORT" SCRIPT_URL="$SCRIPT_URL" sh "$0" "$@"
+      exec sudo env ROTATE_ATTEMPTS="$ROTATE_ATTEMPTS" SOCKS_PORT="$SOCKS_PORT" SCRIPT_URL="$SCRIPT_URL" sh "$0" "$@"
     fi
     die "请使用 root 运行，或先安装 sudo。"
   fi
@@ -226,42 +223,6 @@ set_proxy_mode() {
     || die "无法设置 SOCKS5 端口 $SOCKS_PORT。"
 }
 
-random_warp_endpoint() {
-  COUNT="$(printf '%s\n' $ENDPOINT_BASES | wc -l | tr -d ' ')"
-  [ -n "$COUNT" ] && [ "$COUNT" -gt 0 ] || return 1
-
-  SEED="$(od -An -N2 -tu2 /dev/urandom 2>/dev/null | tr -d ' ' || true)"
-  [ -n "$SEED" ] || SEED="$(date +%s)"
-
-  BASE_INDEX=$(( SEED % COUNT + 1 ))
-  LAST_OCTET=$(( (SEED / COUNT) % 254 + 1 ))
-  BASE="$(printf '%s\n' $ENDPOINT_BASES | sed -n "${BASE_INDEX}p")"
-  [ -n "$BASE" ] || return 1
-
-  printf '%s.%s:%s\n' "$BASE" "$LAST_OCTET" "$ENDPOINT_PORT"
-}
-
-set_custom_endpoint() {
-  ENDPOINT="$1"
-  warp set-custom-endpoint "$ENDPOINT" >/dev/null 2>&1 \
-    || warp tunnel endpoint set "$ENDPOINT" >/dev/null 2>&1 \
-    || warp endpoint set "$ENDPOINT" >/dev/null 2>&1
-}
-
-try_random_endpoint() {
-  [ "$FORCE_ENDPOINT_ROTATE" = "1" ] || return 0
-
-  ENDPOINT="$(random_warp_endpoint 2>/dev/null || true)"
-  [ -n "$ENDPOINT" ] || return 0
-
-  if set_custom_endpoint "$ENDPOINT"; then
-    say "已切换 WARP 入口 endpoint：$ENDPOINT"
-  else
-    say "当前 warp-cli 不支持自定义 endpoint，跳过入口切换。"
-    FORCE_ENDPOINT_ROTATE=0
-  fi
-}
-
 connect_warp() {
   warp connect >/dev/null 2>&1 || true
   sleep 5
@@ -336,12 +297,6 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-Environment="ROTATE_ATTEMPTS=$ROTATE_ATTEMPTS"
-Environment="FORCE_ENDPOINT_ROTATE=$FORCE_ENDPOINT_ROTATE"
-Environment="ENDPOINT_PORT=$ENDPOINT_PORT"
-Environment="ENDPOINT_BASES=$ENDPOINT_BASES"
-Environment="SOCKS_PORT=$SOCKS_PORT"
-Environment="SCRIPT_URL=$SCRIPT_URL"
 ExecStart=$TIMER_EXEC
 EOF
 
@@ -470,11 +425,9 @@ rotate_ip() {
 
     if [ "$ATTEMPT" -eq 1 ]; then
       disconnect_warp
-      try_random_endpoint
       connect_warp
     else
       force_new_registration
-      try_random_endpoint
     fi
 
     systemctl restart warp-svc || true
@@ -483,12 +436,7 @@ rotate_ip() {
     set_proxy_mode
     connect_warp
 
-    if ! wait_for_warp_health 75; then
-      say "本次尝试后 SOCKS5 未恢复，继续下一次尝试。"
-      ATTEMPT=$(( ATTEMPT + 1 ))
-      continue
-    fi
-
+    wait_for_warp_health 75 || die "换 IP 后 SOCKS5 健康检查失败。"
     NEW_IP="$(warp_ip 2>/dev/null || true)"
     say "本次检测到的 WARP 出口 IP：${NEW_IP:-unknown}"
 
@@ -503,11 +451,7 @@ rotate_ip() {
     ATTEMPT=$(( ATTEMPT + 1 ))
   done
 
-  if [ -z "$NEW_IP" ]; then
-    die "已尝试 $ROTATE_ATTEMPTS 次，但未能获取可用的 WARP 出口 IP。请稍后重试或关闭强制 endpoint 切换：FORCE_ENDPOINT_ROTATE=0。"
-  fi
-
-  printf '%s\n' "$NEW_IP" > "$STATE_IP_FILE"
+  [ -n "$NEW_IP" ] && printf '%s\n' "$NEW_IP" > "$STATE_IP_FILE"
   die "已尝试 $ROTATE_ATTEMPTS 次，但 WARP 仍分配同一个出口 IP：${NEW_IP:-unknown}。这通常是 Cloudflare 当前调度没有给这台机器分配新出口。"
 }
 
@@ -596,12 +540,6 @@ usage() {
 
 默认动作: menu
 SOCKS5: $SOCKS_HOST:$SOCKS_PORT
-
-环境变量:
-  ROTATE_ATTEMPTS       换 IP 最大尝试次数，默认 3。
-  FORCE_ENDPOINT_ROTATE 换 IP 时随机切换 WARP 入口 endpoint，默认 1。
-  ENDPOINT_PORT         WARP endpoint 端口，默认 2408。
-  ENDPOINT_BASES        WARP endpoint 候选网段前缀。
 
 卸载模式:
   uninstall  移除本脚本创建的定时器、状态、日志并断开 WARP，保留 cloudflare-warp 软件包。
