@@ -20,14 +20,13 @@ SOCKS_PORT="${SOCKS_PORT:-40000}"
 ROTATE_ATTEMPTS="${ROTATE_ATTEMPTS:-3}"
 FORCE_ENDPOINT_ROTATE="${FORCE_ENDPOINT_ROTATE:-1}"
 ENDPOINT_PORT="${ENDPOINT_PORT:-2408}"
-ENDPOINT_BASES="${ENDPOINT_BASES:-}"
-ENDPOINT_CANDIDATES="${ENDPOINT_CANDIDATES:-162.159.193:2408,500,1701,4500 162.159.197:443,500,1701,4500,4443,8443,8095 162.159.192:2408,500,1701,4500}"
+ENDPOINT_BASES="${ENDPOINT_BASES:-162.159.192 162.159.193 162.159.195 162.159.197 188.114.96 188.114.97 188.114.98 188.114.99}"
 STATE_DIR="/var/lib/warp-socks5"
 STATE_IP_FILE="$STATE_DIR/current_ip"
 LOG_FILE="/var/log/warp-socks5.log"
 SYSTEMD_SERVICE="/etc/systemd/system/warp-socks5-rotate.service"
 SYSTEMD_TIMER="/etc/systemd/system/warp-socks5-rotate.timer"
-SCRIPT_URL="${SCRIPT_URL:-https://raw.githubusercontent.com/w243420707/warp-socks5-installer/main/install-warp-socks5.sh?v=20260708-3}"
+SCRIPT_URL="${SCRIPT_URL:-https://raw.githubusercontent.com/w243420707/warp-socks5-installer/main/install-warp-socks5.sh?v=20260708-2}"
 SELF_PATH=""
 
 log() {
@@ -47,7 +46,7 @@ die() {
 need_root() {
   if [ "$(id -u)" -ne 0 ]; then
     if command -v sudo >/dev/null 2>&1; then
-      exec sudo env ROTATE_ATTEMPTS="$ROTATE_ATTEMPTS" FORCE_ENDPOINT_ROTATE="$FORCE_ENDPOINT_ROTATE" ENDPOINT_PORT="$ENDPOINT_PORT" ENDPOINT_BASES="$ENDPOINT_BASES" ENDPOINT_CANDIDATES="$ENDPOINT_CANDIDATES" SOCKS_PORT="$SOCKS_PORT" SCRIPT_URL="$SCRIPT_URL" sh "$0" "$@"
+      exec sudo env ROTATE_ATTEMPTS="$ROTATE_ATTEMPTS" FORCE_ENDPOINT_ROTATE="$FORCE_ENDPOINT_ROTATE" ENDPOINT_PORT="$ENDPOINT_PORT" ENDPOINT_BASES="$ENDPOINT_BASES" SOCKS_PORT="$SOCKS_PORT" SCRIPT_URL="$SCRIPT_URL" sh "$0" "$@"
     fi
     die "请使用 root 运行，或先安装 sudo。"
   fi
@@ -228,34 +227,18 @@ set_proxy_mode() {
 }
 
 random_warp_endpoint() {
-  if [ -n "$ENDPOINT_BASES" ]; then
-    POOL="$ENDPOINT_BASES"
-  else
-    POOL="$ENDPOINT_CANDIDATES"
-  fi
-
-  COUNT="$(printf '%s\n' $POOL | wc -l | tr -d ' ')"
+  COUNT="$(printf '%s\n' $ENDPOINT_BASES | wc -l | tr -d ' ')"
   [ -n "$COUNT" ] && [ "$COUNT" -gt 0 ] || return 1
 
   SEED="$(od -An -N2 -tu2 /dev/urandom 2>/dev/null | tr -d ' ' || true)"
   [ -n "$SEED" ] || SEED="$(date +%s)"
 
   BASE_INDEX=$(( SEED % COUNT + 1 ))
-  CANDIDATE="$(printf '%s\n' $POOL | sed -n "${BASE_INDEX}p")"
-  BASE="${CANDIDATE%%:*}"
-  PORTS="${CANDIDATE#*:}"
-  if [ "$PORTS" = "$CANDIDATE" ]; then
-    PORTS="$ENDPOINT_PORT"
-  fi
-
-  PORT_COUNT="$(printf '%s\n' "$PORTS" | tr ',' '\n' | wc -l | tr -d ' ')"
-  PORT_INDEX=$(( (SEED / COUNT) % PORT_COUNT + 1 ))
-  PORT="$(printf '%s\n' "$PORTS" | tr ',' '\n' | sed -n "${PORT_INDEX}p")"
-  LAST_OCTET=$(( (SEED / COUNT / PORT_COUNT) % 254 + 1 ))
+  LAST_OCTET=$(( (SEED / COUNT) % 254 + 1 ))
+  BASE="$(printf '%s\n' $ENDPOINT_BASES | sed -n "${BASE_INDEX}p")"
   [ -n "$BASE" ] || return 1
-  [ -n "$PORT" ] || return 1
 
-  printf '%s.%s:%s\n' "$BASE" "$LAST_OCTET" "$PORT"
+  printf '%s.%s:%s\n' "$BASE" "$LAST_OCTET" "$ENDPOINT_PORT"
 }
 
 set_custom_endpoint() {
@@ -357,7 +340,6 @@ Environment="ROTATE_ATTEMPTS=$ROTATE_ATTEMPTS"
 Environment="FORCE_ENDPOINT_ROTATE=$FORCE_ENDPOINT_ROTATE"
 Environment="ENDPOINT_PORT=$ENDPOINT_PORT"
 Environment="ENDPOINT_BASES=$ENDPOINT_BASES"
-Environment="ENDPOINT_CANDIDATES=$ENDPOINT_CANDIDATES"
 Environment="SOCKS_PORT=$SOCKS_PORT"
 Environment="SCRIPT_URL=$SCRIPT_URL"
 ExecStart=$TIMER_EXEC
@@ -618,9 +600,8 @@ SOCKS5: $SOCKS_HOST:$SOCKS_PORT
 环境变量:
   ROTATE_ATTEMPTS       换 IP 最大尝试次数，默认 3。
   FORCE_ENDPOINT_ROTATE 换 IP 时随机切换 WARP 入口 endpoint，默认 1。
-  ENDPOINT_CANDIDATES   WARP endpoint 候选池，格式为 前缀:端口,端口。
-  ENDPOINT_BASES        兼容旧参数；设置后会按这些前缀配合 ENDPOINT_PORT 随机。
-  ENDPOINT_PORT         ENDPOINT_BASES 模式下使用的端口，默认 2408。
+  ENDPOINT_PORT         WARP endpoint 端口，默认 2408。
+  ENDPOINT_BASES        WARP endpoint 候选网段前缀。
 
 卸载模式:
   uninstall  移除本脚本创建的定时器、状态、日志并断开 WARP，保留 cloudflare-warp 软件包。
