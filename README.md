@@ -27,14 +27,6 @@ sudo sh install-warp-socks5.sh uninstall
 sudo sh install-warp-socks5.sh purge
 ```
 
-换 IP 默认最多尝试 3 次。只有检测到新出口 IP 和旧出口 IP 不同时才算成功；如果 Cloudflare 仍分配同一个出口 IP，脚本会明确报错，不再假报成功。
-
-可以增加尝试次数：
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/w243420707/warp-socks5-installer/main/install-warp-socks5.sh | sudo env ROTATE_ATTEMPTS=5 sh -s rotate
-```
-
 卸载说明：
 
 ```text

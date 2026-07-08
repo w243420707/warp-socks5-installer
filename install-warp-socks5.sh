@@ -17,13 +17,12 @@ set -eu
 
 SOCKS_HOST="127.0.0.1"
 SOCKS_PORT="${SOCKS_PORT:-40000}"
-ROTATE_ATTEMPTS="${ROTATE_ATTEMPTS:-3}"
 STATE_DIR="/var/lib/warp-socks5"
 STATE_IP_FILE="$STATE_DIR/current_ip"
 LOG_FILE="/var/log/warp-socks5.log"
 SYSTEMD_SERVICE="/etc/systemd/system/warp-socks5-rotate.service"
 SYSTEMD_TIMER="/etc/systemd/system/warp-socks5-rotate.timer"
-SCRIPT_URL="${SCRIPT_URL:-https://raw.githubusercontent.com/w243420707/warp-socks5-installer/main/install-warp-socks5.sh?v=20260708-1}"
+SCRIPT_URL="${SCRIPT_URL:-https://raw.githubusercontent.com/w243420707/warp-socks5-installer/main/install-warp-socks5.sh?v=20260607-2}"
 SELF_PATH=""
 
 log() {
@@ -43,7 +42,7 @@ die() {
 need_root() {
   if [ "$(id -u)" -ne 0 ]; then
     if command -v sudo >/dev/null 2>&1; then
-      exec sudo env ROTATE_ATTEMPTS="$ROTATE_ATTEMPTS" SOCKS_PORT="$SOCKS_PORT" SCRIPT_URL="$SCRIPT_URL" sh "$0" "$@"
+      exec sudo sh "$0" "$@"
     fi
     die "请使用 root 运行，或先安装 sudo。"
   fi
@@ -413,46 +412,32 @@ rotate_ip() {
   ensure_registered
   set_proxy_mode
 
-  OLD_IP="$(warp_ip 2>/dev/null || true)"
-  [ -z "$OLD_IP" ] && [ -r "$STATE_IP_FILE" ] && OLD_IP="$(sed -n '1p' "$STATE_IP_FILE" || true)"
+  OLD_IP=""
+  [ -r "$STATE_IP_FILE" ] && OLD_IP="$(sed -n '1p' "$STATE_IP_FILE" || true)"
+  [ -z "$OLD_IP" ] && OLD_IP="$(warp_ip 2>/dev/null || true)"
 
   say "开始更换 WARP IP，旧 IP：${OLD_IP:-unknown}"
+  disconnect_warp
+  connect_warp
 
-  ATTEMPT=1
-  NEW_IP=""
-  while [ "$ATTEMPT" -le "$ROTATE_ATTEMPTS" ]; do
-    say "正在进行第 $ATTEMPT/$ROTATE_ATTEMPTS 次换 IP 尝试。"
-
-    if [ "$ATTEMPT" -eq 1 ]; then
-      disconnect_warp
-      connect_warp
-    else
-      force_new_registration
-    fi
-
-    systemctl restart warp-svc || true
-    sleep 4
-    ensure_registered
+  NEW_IP="$(warp_ip 2>/dev/null || true)"
+  if [ -n "$OLD_IP" ] && [ -n "$NEW_IP" ] && [ "$NEW_IP" = "$OLD_IP" ]; then
+    say "重连后 IP 未变化，尝试重新注册设备。"
+    force_new_registration
     set_proxy_mode
     connect_warp
-
-    wait_for_warp_health 75 || die "换 IP 后 SOCKS5 健康检查失败。"
     NEW_IP="$(warp_ip 2>/dev/null || true)"
-    say "本次检测到的 WARP 出口 IP：${NEW_IP:-unknown}"
+  fi
 
-    if [ -n "$NEW_IP" ] && { [ -z "$OLD_IP" ] || [ "$NEW_IP" != "$OLD_IP" ]; }; then
-      printf '%s\n' "$NEW_IP" > "$STATE_IP_FILE"
-      say "换 IP 成功：${OLD_IP:-unknown} -> $NEW_IP"
-      say "SOCKS5 已重启并恢复正常：$SOCKS_HOST:$SOCKS_PORT"
-      return 0
-    fi
+  systemctl restart warp-svc
+  sleep 4
+  ensure_registered
+  set_proxy_mode
+  connect_warp
 
-    say "本次尝试后 IP 仍未变化。"
-    ATTEMPT=$(( ATTEMPT + 1 ))
-  done
-
-  [ -n "$NEW_IP" ] && printf '%s\n' "$NEW_IP" > "$STATE_IP_FILE"
-  die "已尝试 $ROTATE_ATTEMPTS 次，但 WARP 仍分配同一个出口 IP：${NEW_IP:-unknown}。这通常是 Cloudflare 当前调度没有给这台机器分配新出口。"
+  wait_for_warp_health 75 || die "换 IP 后 SOCKS5 健康检查失败。"
+  save_current_ip
+  say "换 IP 完成，SOCKS5 已重启并恢复正常：$SOCKS_HOST:$SOCKS_PORT"
 }
 
 show_status() {
