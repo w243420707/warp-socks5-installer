@@ -23,7 +23,7 @@ STATE_IP_FILE="$STATE_DIR/current_ip"
 LOG_FILE="/var/log/warp-socks5.log"
 SYSTEMD_SERVICE="/etc/systemd/system/warp-socks5-rotate.service"
 SYSTEMD_TIMER="/etc/systemd/system/warp-socks5-rotate.timer"
-SCRIPT_URL="${SCRIPT_URL:-https://raw.githubusercontent.com/w243420707/warp-socks5-installer/main/install-warp-socks5.sh?v=20261010-3}"
+SCRIPT_URL="${SCRIPT_URL:-https://raw.githubusercontent.com/w243420707/warp-socks5-installer/main/install-warp-socks5.sh?v=20261010-4}"
 SELF_PATH=""
 
 # Detect terminal output. `curl | sudo sh` makes stdin a pipe, so use stdout.
@@ -61,6 +61,10 @@ else
 fi
 
 # Helper: colored output
+log() {
+  printf '%s %s\n' "$(date '+%F %T')" "$*" | tee -a "$LOG_FILE" >/dev/null 2>&1 || true
+}
+
 say() {
   printf '%s\n' "$*"
   log "$*"
