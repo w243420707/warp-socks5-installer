@@ -5,13 +5,14 @@
 # systemd timer to rotate the WARP exit IP and restart the proxy.
 #
 # Usage:
-#   sh install-warp-socks5.sh          # interactive menu
+#   sh install-warp-socks5.sh          # interactive TUI menu
 #   sh install-warp-socks5.sh install  # install or repair
 #   sh install-warp-socks5.sh status   # show status and current WARP IP
 #   sh install-warp-socks5.sh rotate   # rotate WARP IP now
 #   sh install-warp-socks5.sh uninstall
 #   sh install-warp-socks5.sh purge
 #   sh install-warp-socks5.sh uninstall-timer
+#   sh install-warp-socks5.sh --help   # show help
 
 set -eu
 
@@ -22,20 +23,51 @@ STATE_IP_FILE="$STATE_DIR/current_ip"
 LOG_FILE="/var/log/warp-socks5.log"
 SYSTEMD_SERVICE="/etc/systemd/system/warp-socks5-rotate.service"
 SYSTEMD_TIMER="/etc/systemd/system/warp-socks5-rotate.timer"
-SCRIPT_URL="${SCRIPT_URL:-https://raw.githubusercontent.com/w243420707/warp-socks5-installer/main/install-warp-socks5.sh?v=20260607-2}"
+SCRIPT_URL="${SCRIPT_URL:-https://raw.githubusercontent.com/w243420707/warp-socks5-installer/main/install-warp-socks5.sh?v=20261010-1}"
 SELF_PATH=""
 
-log() {
-  printf '%s %s\n' "$(date '+%F %T')" "$*" | tee -a "$LOG_FILE" >/dev/null 2>&1 || true
-}
+# TUI colors (terminal escape sequences)
+if [ -t 0 ] && [ -t 1 ]; then
+    COLORS_ENABLED=1
+else
+    COLORS_ENABLED=0
+fi
 
+# ANSI color codes
+C_GREEN='\033[0;32m'
+C_RED='\033[0;31m'
+C_YELLOW='\033[1;33m'
+C_BLUE='\033[0;34m'
+C_PURPLE='\033[0;35m'
+C_CYAN='\033[0;36m'
+C_WHITE='\033[1;37m'
+C_GRAY='\033[0;90m'
+C_BOLD='\033[1m'
+C_RESET='\033[0m'
+C_CLEAR='\033[2J\033[H'
+
+# Helper: colored output
 say() {
   printf '%s\n' "$*"
   log "$*"
 }
 
+# Helper: colored output with prefix
+say_c() {
+  if [ "$COLORS_ENABLED" = "1" ]; then
+    printf "%b%s${C_RESET}\n" "$1" "$2"
+  else
+    printf '%s\n' "$2"
+  fi
+  log "$2"
+}
+
 die() {
-  say "错误: $*"
+  if [ "$COLORS_ENABLED" = "1" ]; then
+    printf "${C_RED}${C_BOLD}错误:${C_RESET} %s\n" "$*"
+  else
+    say "错误: $*"
+  fi
   exit 1
 }
 
@@ -50,6 +82,49 @@ need_root() {
 
 cmd_exists() {
   command -v "$1" >/dev/null 2>&1
+}
+
+# TUI Helper Functions
+clear_screen_tui() {
+  printf '\033[2J\033[H' 2>/dev/null || clear
+}
+
+# Read a single character from terminal (POSIX-safe)
+read_key() {
+  if [ -r /dev/tty ]; then
+    if command -v stty >/dev/null 2>&1; then
+      stty raw -echo 2>/dev/null </dev/tty || true
+    fi
+    KEY="$(dd bs=1 count=1 2>/dev/null </dev/tty || true)"
+    if command -v stty >/dev/null 2>&1; then
+      stty sane 2>/dev/null </dev/tty || true
+    fi
+    printf '%s' "$KEY"
+  fi
+}
+
+# Draw a simple box with border
+draw_box() {
+  local x=$1 y=$2 width=$3 height=$4 title="${5:-}"
+  local i j
+  printf '\033[%d;%dH' "$y" "$x"
+  printf '╔'
+  for ((i=1; i<width-1; i++)); do printf '═'; done
+  printf '╗\n'
+  for ((i=1; i<height-1; i++)); do
+    printf '\033[%d;%dH' "$((y+i))" "$x"
+    printf '║'
+    for ((j=1; j<width-1; j++)); do printf ' '; done
+    printf '║\n'
+  done
+  printf '\033[%d;%dH' "$((y+height-1))" "$x"
+  printf '╚'
+  for ((i=1; i<width-1; i++)); do printf '═'; done
+  printf '╝\n'
+  if [ -n "$title" ]; then
+    printf '\033[%d;%dH' "$y" "$((x+2))"
+    printf '%s' "$title"
+  fi
 }
 
 detect_os() {
@@ -481,25 +556,132 @@ confirm_tty() {
   esac
 }
 
+show_current_ip() {
+  IP=""
+  [ -r "$STATE_IP_FILE" ] && IP="$(sed -n '1p' "$STATE_IP_FILE" || true)"
+  if [ -z "$IP" ]; then
+    IP="$(warp_ip 2>/dev/null || true)"
+  fi
+  if [ -n "$IP" ]; then
+    printf '%s' "$IP"
+  else
+    printf 'unknown'
+  fi
+}
+
+show_help() {
+  clear_screen_tui
+  printf '%s\n' "${C_BOLD}Cloudflare WARP SOCKS5 管理工具 - 使用说明${C_RESET}"
+  printf '\n%s\n' "${C_CYAN}菜单操作:${C_RESET}"
+  if [ "$COLORS_ENABLED" = "1" ]; then
+    printf '  %s数字键 1-9%s  直接选择菜单项\n' "$C_BLUE" "$C_RESET"
+    printf '  %sEnter 键%s    执行所选操作\n' "$C_BLUE" "$C_RESET"
+    printf '  %s0 键%s       退出程序\n' "$C_BLUE" "$C_RESET"
+  else
+    printf '  数字键 1-9  直接选择菜单项\n'
+    printf '  Enter 键    执行所选操作\n'
+    printf '  0 键       退出程序\n'
+  fi
+
+  printf '\n%s\n' "${C_CYAN}快捷命令:${C_RESET}"
+  printf '  sh install-warp-socks5.sh install          安装或修复\n'
+  printf '  sh install-warp-socks5.sh status           查看状态\n'
+  printf '  sh install-warp-socks5.sh rotate           立即换IP\n'
+  printf '  sh install-warp-socks5.sh enable-timer     启用定时器\n'
+  printf '  sh install-warp-socks5.sh uninstall-timer  停用定时器\n'
+  printf '  sh install-warp-socks5.sh uninstall        仅卸载本地配置\n'
+  printf '  sh install-warp-socks5.sh purge            彻底卸载\n'
+  printf '  sh install-warp-socks5.sh help             显示帮助\n'
+
+  printf '\n'
+  printf '%s\n' "${C_GRAY}按任意键返回..."
+  read_key >/dev/null
+}
+
+show_status_tui() {
+  clear_screen_tui
+  printf '%s\n' "${C_BOLD}Cloudflare WARP SOCKS5 管理工具 - 状态信息${C_RESET}"
+  printf '\n'
+
+  if cmd_exists warp-cli; then
+    printf '%sWARP 服务:%s 已安装\n' "$C_GREEN" "$C_RESET"
+    printf '%sWARP 状态:%s ' "$C_YELLOW" "$C_RESET"
+    warp status 2>/dev/null || printf '无法获取状态\n'
+    printf '\n'
+  else
+    printf '%sWARP 服务:%s 未安装\n' "$C_RED" "$C_RESET"
+  fi
+
+  printf '%s代理地址:%s %s:%s\n' "$C_CYAN" "$C_RESET" "$SOCKS_HOST" "$SOCKS_PORT"
+
+  if systemd_available && cmd_exists systemctl; then
+    if systemctl is-active --quiet warp-svc 2>/dev/null; then
+      printf '%s服务状态:%s %s正常运行%s\n' "$C_GREEN" "$C_RESET" "$C_BOLD" "$C_RESET"
+    else
+      printf '%s服务状态:%s %s已停止%s\n' "$C_RED" "$C_RESET" "$C_BOLD" "$C_RESET"
+    fi
+
+    if systemctl is-active --quiet warp-socks5-rotate.timer 2>/dev/null; then
+      printf '%s定时器状态:%s %s已启用%s\n' "$C_GREEN" "$C_RESET" "$C_BOLD" "$C_RESET"
+    else
+      printf '%s定时器状态:%s %s已停用%s\n' "$C_YELLOW" "$C_RESET" "$C_BOLD" "$C_RESET"
+    fi
+  fi
+
+  printf '\n%s当前出口 IP:%s %s\n' "$C_BLUE" "$C_RESET" "$(show_current_ip)"
+  printf '%s日志文件:%s %s\n' "$C_GRAY" "$C_RESET" "$LOG_FILE"
+
+  printf '\n'
+  printf '%s\n' "${C_GRAY}按任意键返回..."
+  read_key >/dev/null
+}
+
 interactive_menu() {
   while :; do
-    printf '\nCloudflare WARP SOCKS5 管理菜单\n' >/dev/tty
-    printf '1) 安装或修复 SOCKS5 127.0.0.1:%s（默认，包含每日自动换 IP 和重启 WARP）\n' "$SOCKS_PORT" >/dev/tty
-    printf '2) 查看当前状态\n' >/dev/tty
-    printf '3) 立即更换 WARP IP\n' >/dev/tty
-    printf '4) 启用每日自动更换 IP 定时器\n' >/dev/tty
-    printf '5) 停用每日自动更换 IP 定时器\n' >/dev/tty
-    printf '6) 仅卸载本地 SOCKS5 配置\n' >/dev/tty
-    printf '7) 彻底卸载 cloudflare-warp 和相关配置\n' >/dev/tty
-    printf '0) 退出\n\n' >/dev/tty
+    clear_screen_tui
 
-    CHOICE="$(read_tty '请选择，直接回车默认执行 1: ' '1')"
+    printf '%s╔══════════════════════════════════════════════════════════════════════╗%s\n' "$C_CYAN" "$C_RESET"
+    printf '%s║%s%s  Cloudflare WARP SOCKS5 管理工具 (TUI)                  %s%s%s   ║%s\n' "$C_CYAN" "$C_RESET" "$C_BOLD" "$C_CYAN" "$C_RESET" "$(date '+%H:%M')" "$C_RESET"
+    printf '%s╚══════════════════════════════════════════════════════════════════════╝%s\n' "$C_CYAN" "$C_RESET"
+    printf '\n'
+
+    IP="$(show_current_ip)"
+    printf '%s┌─ 系统状态 ──────────────────────────────────────────────────────────┐%s\n' "$C_BLUE" "$C_RESET"
+    if cmd_exists warp-cli && warp status >/dev/null 2>&1; then
+      printf '│  WARP 状态: %s已连接%s    │  出口 IP: %s%-15s%s    │  端口: %s%s%s%s%s\n' "$C_GREEN" "$C_RESET" "$C_BOLD" "$IP" "$C_RESET" "$C_CYAN" "$C_RESET" "$SOCKS_PORT" "$C_BLUE" "$C_RESET"
+    else
+      printf '│  WARP 状态: %s未安装/未连接%s  │  出口 IP: %-15s    │  端口: %s\n' "$C_RED" "$C_RESET" "$IP" "$SOCKS_PORT"
+    fi
+    printf '%s└──────────────────────────────────────────────────────────────────────┘%s\n' "$C_BLUE" "$C_RESET"
+    printf '\n'
+
+    printf '%s┌─ 功能菜单 ──────────────────────────────────────────────────────────┐%s\n' "$C_BLUE" "$C_RESET"
+    printf '│  %s[1]%s 安装/修复      配置 WARP SOCKS5 代理并启用每日自动换 IP              │\n' "$C_GREEN" "$C_RESET"
+    printf '│  %s[2]%s 查看状态      显示当前 WARP 状态和出口 IP                        │\n' "$C_BLUE" "$C_RESET"
+    printf '│  %s[3]%s 立即换 IP      立即更换 WARP 出口 IP                              │\n' "$C_PURPLE" "$C_RESET"
+    printf '│  %s[4]%s 启用定时器    启用每日自动换 IP 定时任务 (04:20 运行)             │\n' "$C_YELLOW" "$C_RESET"
+    printf '│  %s[5]%s 停用定时器    停用每日自动换 IP 定时任务                          │\n' "$C_YELLOW" "$C_RESET"
+    printf '│  %s[6]%s 仅卸载        移除本地 SOCKS5 配置，保留 cloudflare-warp          │\n' "$C_RED" "$C_RESET"
+    printf '│  %s[7]%s 彻底卸载      卸载 cloudflare-warp 和所有相关配置                  │\n' "$C_RED" "$C_RESET"
+    printf '│  %s[H]%s 查看帮助      显示使用说明和快捷键                                │\n' "$C_CYAN" "$C_RESET"
+    printf '│  %s[0]%s 退出程序      返回到命令行                                       │\n' "$C_GRAY" "$C_RESET"
+    printf '%s└──────────────────────────────────────────────────────────────────────┘%s\n' "$C_BLUE" "$C_RESET"
+    printf '\n'
+
+    printf '%s请选择操作 (直接回车默认 [1]):%s ' "$C_BOLD" "$C_RESET"
+
+    CHOICE="$(read_tty '' '1')"
+
     case "$CHOICE" in
-      1) repair_or_install; exit 0 ;;
-      2) show_status; exit 0 ;;
+      1|'') repair_or_install; exit 0 ;;
+      2) show_status_tui ;;
       3) rotate_ip; exit 0 ;;
       4) install_timer; exit 0 ;;
-      5) remove_timer; exit 0 ;;
+      5)
+        remove_timer
+        printf '\n%s\n' "${C_YELLOW}按任意键返回..."
+        read_key >/dev/null
+        ;;
       6)
         if confirm_tty "确认移除定时器、状态、日志并断开 WARP，但保留 cloudflare-warp 软件包吗？"; then
           uninstall_local_config
@@ -512,9 +694,15 @@ interactive_menu() {
         fi
         exit 0
         ;;
+      h|H) show_help ;;
       0) exit 0 ;;
-      *) printf '无效选择。\n' >/dev/tty ;;
+      *) printf '%s无效选择。%s\n' "$C_RED" "$C_RESET" ;;
     esac
+
+    if [ "$CHOICE" != "0" ]; then
+      printf '%s按任意键返回菜单...%s' "$C_GRAY" "$C_RESET"
+      read_key >/dev/null
+    fi
   done
 }
 
