@@ -23,28 +23,42 @@ STATE_IP_FILE="$STATE_DIR/current_ip"
 LOG_FILE="/var/log/warp-socks5.log"
 SYSTEMD_SERVICE="/etc/systemd/system/warp-socks5-rotate.service"
 SYSTEMD_TIMER="/etc/systemd/system/warp-socks5-rotate.timer"
-SCRIPT_URL="${SCRIPT_URL:-https://raw.githubusercontent.com/w243420707/warp-socks5-installer/main/install-warp-socks5.sh?v=20261010-2}"
+SCRIPT_URL="${SCRIPT_URL:-https://raw.githubusercontent.com/w243420707/warp-socks5-installer/main/install-warp-socks5.sh?v=20261010-3}"
 SELF_PATH=""
 
-# TUI colors (terminal escape sequences)
-if [ -t 0 ] && [ -t 1 ]; then
-    COLORS_ENABLED=1
+# Detect terminal output. `curl | sudo sh` makes stdin a pipe, so use stdout.
+if [ -t 1 ]; then
+  COLORS_ENABLED=1
 else
-    COLORS_ENABLED=0
+  COLORS_ENABLED=0
 fi
 
-# ANSI color codes
-C_GREEN='\033[0;32m'
-C_RED='\033[0;31m'
-C_YELLOW='\033[1;33m'
-C_BLUE='\033[0;34m'
-C_PURPLE='\033[0;35m'
-C_CYAN='\033[0;36m'
-C_WHITE='\033[1;37m'
-C_GRAY='\033[0;90m'
-C_BOLD='\033[1m'
-C_RESET='\033[0m'
-C_CLEAR='\033[2J\033[H'
+# ANSI color codes: generate real ESC bytes with printf (POSIX sh compatible).
+if [ "$COLORS_ENABLED" = "1" ]; then
+  C_GREEN="$(printf '\033[0;32m')"
+  C_RED="$(printf '\033[0;31m')"
+  C_YELLOW="$(printf '\033[1;33m')"
+  C_BLUE="$(printf '\033[0;34m')"
+  C_PURPLE="$(printf '\033[0;35m')"
+  C_CYAN="$(printf '\033[0;36m')"
+  C_WHITE="$(printf '\033[1;37m')"
+  C_GRAY="$(printf '\033[0;90m')"
+  C_BOLD="$(printf '\033[1m')"
+  C_RESET="$(printf '\033[0m')"
+  C_CLEAR="$(printf '\033[2J\033[H')"
+else
+  C_GREEN=""
+  C_RED=""
+  C_YELLOW=""
+  C_BLUE=""
+  C_PURPLE=""
+  C_CYAN=""
+  C_WHITE=""
+  C_GRAY=""
+  C_BOLD=""
+  C_RESET=""
+  C_CLEAR=""
+fi
 
 # Helper: colored output
 say() {
@@ -660,7 +674,7 @@ interactive_menu() {
     if cmd_exists warp-cli && warp status >/dev/null 2>&1; then
       printf '│  WARP 状态: %s已连接%s    │  出口 IP: %s%-15s%s    │  端口: %s%s%s%s%s\n' "$C_GREEN" "$C_RESET" "$C_BOLD" "$IP" "$C_RESET" "$C_CYAN" "$C_RESET" "$SOCKS_PORT" "$C_BLUE" "$C_RESET"
     else
-      printf '│  WARP 状态: %s未安装/未连接%s  │  出口 IP: %-15s    │  端口: %s\n' "$C_RED" "$C_RESET" "$IP" "$SOCKS_PORT"
+      printf '│  WARP 状态: %s未安装/未连接%s  │  出口 IP: %-15s    │  端口: %s│\n' "$C_RED" "$C_RESET" "$IP" "$SOCKS_PORT"
     fi
     printf '%s└──────────────────────────────────────────────────────────────────────┘%s\n' "$C_BLUE" "$C_RESET"
     printf '\n'
