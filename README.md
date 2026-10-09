@@ -52,6 +52,12 @@ purge      移除 cloudflare-warp 软件包/软件源，以及脚本创建的定
 
 ## 更新日志
 
+### v1.1.1 (2026-10-10)
+
+- 修复 Ubuntu/dash 下执行 `curl ... | sudo sh` 报 `Bad for loop variable` 的问题。
+- 移除脚本中 bash 专属的 C 风格 `for ((...))` 循环，改为 POSIX sh 兼容写法。
+- 已用 dash 和 sh 双重通过语法检查。
+
 ### v1.1.0 (2026-10-10)
 
 - 交互菜单升级为 TUI 界面：彩色边框、状态面板、功能分区。

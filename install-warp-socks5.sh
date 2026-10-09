@@ -23,7 +23,7 @@ STATE_IP_FILE="$STATE_DIR/current_ip"
 LOG_FILE="/var/log/warp-socks5.log"
 SYSTEMD_SERVICE="/etc/systemd/system/warp-socks5-rotate.service"
 SYSTEMD_TIMER="/etc/systemd/system/warp-socks5-rotate.timer"
-SCRIPT_URL="${SCRIPT_URL:-https://raw.githubusercontent.com/w243420707/warp-socks5-installer/main/install-warp-socks5.sh?v=20261010-1}"
+SCRIPT_URL="${SCRIPT_URL:-https://raw.githubusercontent.com/w243420707/warp-socks5-installer/main/install-warp-socks5.sh?v=20261010-2}"
 SELF_PATH=""
 
 # TUI colors (terminal escape sequences)
@@ -103,23 +103,33 @@ read_key() {
   fi
 }
 
-# Draw a simple box with border
+# Draw a simple box with border (POSIX sh compatible)
 draw_box() {
-  local x=$1 y=$2 width=$3 height=$4 title="${5:-}"
-  local i j
+  x=$1
+  y=$2
+  width=$3
+  height=$4
+  title="${5:-}"
+  i=1
+  j=1
   printf '\033[%d;%dH' "$y" "$x"
   printf '╔'
-  for ((i=1; i<width-1; i++)); do printf '═'; done
+  i=1
+  while [ "$i" -lt "$((width-1))" ]; do printf '═'; i=$((i+1)); done
   printf '╗\n'
-  for ((i=1; i<height-1; i++)); do
+  i=1
+  while [ "$i" -lt "$((height-1))" ]; do
     printf '\033[%d;%dH' "$((y+i))" "$x"
     printf '║'
-    for ((j=1; j<width-1; j++)); do printf ' '; done
+    j=1
+    while [ "$j" -lt "$((width-1))" ]; do printf ' '; j=$((j+1)); done
     printf '║\n'
+    i=$((i+1))
   done
   printf '\033[%d;%dH' "$((y+height-1))" "$x"
   printf '╚'
-  for ((i=1; i<width-1; i++)); do printf '═'; done
+  i=1
+  while [ "$i" -lt "$((width-1))" ]; do printf '═'; i=$((i+1)); done
   printf '╝\n'
   if [ -n "$title" ]; then
     printf '\033[%d;%dH' "$y" "$((x+2))"
